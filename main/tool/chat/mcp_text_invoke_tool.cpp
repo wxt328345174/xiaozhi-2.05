@@ -49,6 +49,10 @@ std::string EscapeJsonString(const std::string& input) {
 
 } // namespace
 
+#if CONFIG_TEXT_INVOKE_SELFTEST
+void StartTextInvokeSelftest();
+#endif
+
 TextInvokeTool& TextInvokeTool::GetInstance() {
     static TextInvokeTool instance;
     return instance;
@@ -140,6 +144,14 @@ void TextInvokeTool::Initialize() {
             Submit(text, options);
             return std::string("queued");
         });
+
+#if CONFIG_TEXT_INVOKE_SELFTEST
+    StartTextInvokeSelftest();
+#endif
+}
+
+void TextInvokeTool::Submit(const std::string& text) {
+    Submit(text, Options{});
 }
 
 void TextInvokeTool::Submit(const std::string& text, const Options& options) {
