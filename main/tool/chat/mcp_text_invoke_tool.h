@@ -27,7 +27,8 @@ public:
     };
 
     void Initialize();
-    void Submit(const std::string& text, const Options& options = Options());
+    void Submit(const std::string& text);
+    void Submit(const std::string& text, const Options& options);
     void ProcessQueue(DeviceState current_state);
 
 private:
