@@ -681,6 +681,12 @@ config RECEIVE_CUSTOM_MESSAGE
     help
         Enable custom message reception, allow the device to receive custom messages from the server (preferably through the MQTT protocol)
 
+config TEXT_INVOKE_SELFTEST
+    bool "Enable TextInvoke Selftest (10s trigger)"
+    default n
+    help
+        Enable a minimal acceptance test that triggers TextInvoke after 10 seconds.
+
 menu "Camera Configuration"
     depends on !IDF_TARGET_ESP32
 
