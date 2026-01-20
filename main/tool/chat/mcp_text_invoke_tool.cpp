@@ -1,6 +1,7 @@
 #include "mcp_text_invoke_tool.h"
 
 #include <cstdio>
+#include <vector>
 
 #include "application.h"
 #include "device_state_event.h"
@@ -12,6 +13,47 @@ namespace {
 
 static const char* TAG = "TextInvokeTool";
 static const int kMaxSendRetries = 1;
+
+size_t Utf8CharLen(unsigned char ch) {
+    if ((ch & 0x80) == 0x00) {
+        return 1;
+    }
+    if ((ch & 0xE0) == 0xC0) {
+        return 2;
+    }
+    if ((ch & 0xF0) == 0xE0) {
+        return 3;
+    }
+    if ((ch & 0xF8) == 0xF0) {
+        return 4;
+    }
+    return 1;
+}
+
+std::vector<std::string> SplitUtf8ByChars(const std::string& text, size_t max_chars) {
+    std::vector<std::string> chunks;
+    if (max_chars == 0 || text.empty()) {
+        return chunks;
+    }
+    size_t offset = 0;
+    while (offset < text.size()) {
+        size_t count = 0;
+        size_t start = offset;
+        while (offset < text.size() && count < max_chars) {
+            size_t len = Utf8CharLen(static_cast<unsigned char>(text[offset]));
+            if (offset + len > text.size()) {
+                break;
+            }
+            offset += len;
+            count++;
+        }
+        if (offset == start) {
+            break;
+        }
+        chunks.push_back(text.substr(start, offset - start));
+    }
+    return chunks;
+}
 
 std::string EscapeJsonString(const std::string& input) {
     std::string out;
