@@ -22,6 +22,7 @@ public:
         bool is_daily = false;
         int hour = 0;
         int minute = 0;
+        bool has_daily_keyword = false;
     };
 
     static ParseResult Parse(const std::string& text, int64_t now_ms);

@@ -1,6 +1,7 @@
 ﻿#include "alarm_tool.h"
 
 #include <algorithm>
+#include <cinttypes>
 #include <stdexcept>
 #include <vector>
 
@@ -121,9 +122,9 @@ void AlarmTool::Initialize() {
     bool updated_daily = false;
     for (auto it = alarms_.begin(); it != alarms_.end(); ) {
         if (it->second.is_daily) {
-            int64_t next_trigger = ComputeNextDailyTrigger(now_ms, it->second.hour, it->second.minute);
-            if (next_trigger != it->second.trigger_ms) {
-                it->second.trigger_ms = next_trigger;
+            int64_t updated_trigger = ComputeNextDailyTrigger(now_ms, it->second.hour, it->second.minute);
+            if (updated_trigger != it->second.trigger_ms) {
+                it->second.trigger_ms = updated_trigger;
                 updated_daily = true;
             }
             ++it;
@@ -147,7 +148,7 @@ void AlarmTool::Initialize() {
         });
 
     mcp_server.AddTool("alarm.set_alarm",
-        "Set an alarm with time_text and optional label. Use repeat=DAILY when user says every day (even if time_text is normalized).",
+        "Set an alarm with time_text and optional label. repeat=DAILY only when user explicitly says 每天/每日 (not for plain time-only).",
         PropertyList({
             Property("time_text", kPropertyTypeString),
             Property("label", kPropertyTypeString, ""),
@@ -239,7 +240,17 @@ ReturnValue AlarmTool::HandleSetAlarm(const PropertyList& properties) {
 
     AlarmRecord record;
     record.label = label;
-    const bool is_daily_final = (repeat_upper == "DAILY") || parsed.is_daily;
+    bool is_daily_final = false;
+    const bool repeat_param_daily = (repeat_upper == "DAILY");
+    const bool has_daily_hint = parsed.has_daily_keyword || parsed.is_daily;
+    std::string repeat_reason = "none";
+    if (repeat_param_daily) {
+        is_daily_final = true;
+        repeat_reason = "user_param";
+    } else if (has_daily_hint) {
+        is_daily_final = true;
+        repeat_reason = "daily_keyword";
+    }
     record.is_daily = is_daily_final;
     if (is_daily_final && parsed.kind == TimeParser::ParseKind::kRelative) {
         throw std::runtime_error("daily alarm requires time-of-day, not duration");
@@ -281,14 +292,12 @@ ReturnValue AlarmTool::HandleSetAlarm(const PropertyList& properties) {
 
     cJSON* root = cJSON_CreateObject();
     cJSON_AddNumberToObject(root, "alarm_id", static_cast<double>(record.id));
-    cJSON_AddNumberToObject(root, "trigger_epoch_ms", static_cast<double>(record.trigger_ms));
-    cJSON_AddStringToObject(root, "trigger_time", TimeParser::FormatLocalTime(record.trigger_ms).c_str());
     cJSON_AddBoolToObject(root, "is_daily", record.is_daily);
     cJSON_AddStringToObject(root, "repeat_type", RepeatTypeString(record.is_daily).c_str());
-    ESP_LOGI(TAG, "Alarm saved: id=%u repeat=%s next_trigger=%lld",
+    ESP_LOGI(TAG, "Alarm saved: id=%u repeat=%s reason=%s",
         static_cast<unsigned>(record.id),
         RepeatTypeString(record.is_daily).c_str(),
-        static_cast<long long>(record.trigger_ms));
+        repeat_reason.c_str());
     return root;
 }
 
@@ -298,8 +307,20 @@ ReturnValue AlarmTool::HandleListAlarms(const PropertyList& properties) {
     int64_t now_ms = GetNowMs();
 
     std::lock_guard<std::mutex> lock(mutex_);
+    std::vector<const AlarmRecord*> daily_records;
+    std::vector<const AlarmRecord*> one_time_records;
+    daily_records.reserve(alarms_.size());
+    one_time_records.reserve(alarms_.size());
     for (const auto& entry : alarms_) {
         const AlarmRecord& record = entry.second;
+        if (record.is_daily) {
+            daily_records.push_back(&record);
+        } else {
+            one_time_records.push_back(&record);
+        }
+    }
+
+    auto append_item = [&](const AlarmRecord& record) {
         cJSON* item = cJSON_CreateObject();
         cJSON_AddNumberToObject(item, "id", static_cast<double>(record.id));
         if (!record.label.empty()) {
@@ -308,9 +329,8 @@ ReturnValue AlarmTool::HandleListAlarms(const PropertyList& properties) {
         if (record.is_daily) {
             cJSON_AddNumberToObject(item, "hour", record.hour);
             cJSON_AddNumberToObject(item, "minute", record.minute);
+            cJSON_AddStringToObject(item, "time_of_day", FormatHourMinute(record.hour, record.minute).c_str());
         }
-        cJSON_AddNumberToObject(item, "trigger_epoch_ms", static_cast<double>(record.trigger_ms));
-        cJSON_AddStringToObject(item, "trigger_time", TimeParser::FormatLocalTime(record.trigger_ms).c_str());
         cJSON_AddBoolToObject(item, "is_daily", record.is_daily);
         cJSON_AddStringToObject(item, "repeat_type", RepeatTypeString(record.is_daily).c_str());
         int64_t remaining = (record.trigger_ms - now_ms) / 1000;
@@ -325,14 +345,26 @@ ReturnValue AlarmTool::HandleListAlarms(const PropertyList& properties) {
             display = "一次性 " + TimeParser::FormatLocalTime(record.trigger_ms);
         }
         if (!record.label.empty()) {
-            display += " ";
+            display += "「";
             display += record.label;
+            display += "」";
         }
         display += "（下次：";
         display += TimeParser::FormatLocalTime(record.trigger_ms);
         display += "）";
         cJSON_AddStringToObject(item, "display", display.c_str());
+        cJSON_AddStringToObject(item, "group", record.is_daily ? "DAILY" : "NONE");
         cJSON_AddItemToArray(root, item);
+        ESP_LOGI(TAG, "Alarm list item: id=%u repeat=%s",
+            static_cast<unsigned>(record.id),
+            RepeatTypeString(record.is_daily).c_str());
+    };
+
+    for (const auto* record : daily_records) {
+        append_item(*record);
+    }
+    for (const auto* record : one_time_records) {
+        append_item(*record);
     }
 
     return root;
@@ -470,10 +502,9 @@ void AlarmTool::OnTimer() {
                 if (it->second.is_daily) {
                     due_alarms.push_back(it->second);
                     it->second.trigger_ms = ComputeNextDailyTrigger(now_ms, it->second.hour, it->second.minute);
-                    ESP_LOGI(TAG, "Alarm rescheduled: id=%u repeat=%s next_trigger=%lld",
+                    ESP_LOGI(TAG, "Alarm rescheduled: id=%u repeat=%s",
                         static_cast<unsigned>(it->second.id),
-                        RepeatTypeString(it->second.is_daily).c_str(),
-                        static_cast<long long>(it->second.trigger_ms));
+                        RepeatTypeString(it->second.is_daily).c_str());
                     save_needed = true;
                     ++it;
                 } else {
@@ -565,10 +596,9 @@ void AlarmTool::TriggerAlarm(const AlarmRecord& alarm) {
         text = BuildReminderText("闹钟", alarm.label);
     }
     TextInvokeTool::GetInstance().Submit(text);
-    ESP_LOGI(TAG, "Alarm triggered: id=%u repeat=%s trigger=%lld",
+    ESP_LOGI(TAG, "Alarm triggered: id=%u repeat=%s",
         static_cast<unsigned>(alarm.id),
-        RepeatTypeString(alarm.is_daily).c_str(),
-        static_cast<long long>(alarm.trigger_ms));
+        RepeatTypeString(alarm.is_daily).c_str());
 }
 
 void AlarmTool::TriggerCountdown(const CountdownItem& countdown) {

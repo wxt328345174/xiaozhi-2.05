@@ -536,6 +536,7 @@ TimeParser::ParseResult TimeParser::Parse(const std::string& text, int64_t now_m
     bool is_daily = false;
     if (normalized.find("每天") != std::string::npos || normalized.find("每日") != std::string::npos) {
         is_daily = true;
+        result.has_daily_keyword = true;
         ReplaceAll(normalized, "每天", "");
         ReplaceAll(normalized, "每日", "");
         ESP_LOGI(TAG, "Parse branch: daily keyword");
