@@ -58,6 +58,12 @@ std::string NormalizeEnglishUnits(const std::string& text) {
     std::string out = text;
     ToLowerAscii(out);
 
+    ReplaceAll(out, "day after tomorrow", "后天");
+    ReplaceAll(out, "after tomorrow", "后天");
+    ReplaceAll(out, "tomorrow", "明天");
+    ReplaceAll(out, "today", "今天");
+    ReplaceAll(out, "next week", "下周");
+
     if (StartsWith(out, "after")) {
         out.erase(0, std::strlen("after"));
     } else if (StartsWith(out, "in")) {
@@ -465,6 +471,40 @@ std::string BuildSupportMessage() {
            "7:30/7点半/7点30; 2天9点30分; 每天7:30/每日晚上9点";
 }
 
+bool ParseRelativeDayTime(const std::string& text, int& day_offset, int& hour, int& minute) {
+    size_t pos = 0;
+    while (pos < text.size() && std::isspace(static_cast<unsigned char>(text[pos]))) {
+        ++pos;
+    }
+    int offset = -1;
+    if (text.compare(pos, std::strlen("今天"), "今天") == 0) {
+        offset = 0;
+        pos += std::strlen("今天");
+    } else if (text.compare(pos, std::strlen("明天"), "明天") == 0) {
+        offset = 1;
+        pos += std::strlen("明天");
+    } else if (text.compare(pos, std::strlen("后天"), "后天") == 0) {
+        offset = 2;
+        pos += std::strlen("后天");
+    } else {
+        return false;
+    }
+    while (pos < text.size() && std::isspace(static_cast<unsigned char>(text[pos]))) {
+        ++pos;
+    }
+    std::string time_part = text.substr(pos);
+    if (time_part.empty()) {
+        return false;
+    }
+    Period period = kPeriodNone;
+    if (!ParseTimePart(time_part, hour, minute, &period)) {
+        return false;
+    }
+    ApplyPeriodAdjust(period, hour);
+    day_offset = offset;
+    return true;
+}
+
 } // namespace
 
 TimeParser::ParseResult TimeParser::Parse(const std::string& text, int64_t now_ms) {
@@ -514,6 +554,49 @@ TimeParser::ParseResult TimeParser::Parse(const std::string& text, int64_t now_m
     int hour = 0;
     int minute = 0;
     Period period = kPeriodNone;
+
+    {
+        int day_offset = 0;
+        if (ParseRelativeDayTime(normalized, day_offset, hour, minute)) {
+            time_t now_sec = static_cast<time_t>(now_ms / 1000);
+            std::tm target_tm = {};
+            if (localtime_r(&now_sec, &target_tm) == nullptr) {
+                result.error_code = kErrInvalid;
+                result.error = "failed to read local time";
+                result.message = "读取本地时间失败. " + BuildSupportMessage();
+                return result;
+            }
+            target_tm.tm_mday += day_offset;
+            target_tm.tm_hour = hour;
+            target_tm.tm_min = minute;
+            target_tm.tm_sec = 0;
+            target_tm.tm_isdst = -1;
+            time_t target_epoch = mktime(&target_tm);
+            if (target_epoch < 0) {
+                result.error_code = kErrInvalid;
+                result.error = "invalid date/time";
+                result.message = "日期/时间无效. " + BuildSupportMessage();
+                return result;
+            }
+            int64_t epoch_ms = static_cast<int64_t>(target_epoch) * 1000;
+            if (day_offset == 0 && epoch_ms <= now_ms) {
+                target_tm.tm_mday += 1;
+                target_epoch = mktime(&target_tm);
+                if (target_epoch < 0) {
+                    result.error_code = kErrInvalid;
+                    result.error = "invalid date/time";
+                    result.message = "日期/时间无效. " + BuildSupportMessage();
+                    return result;
+                }
+                epoch_ms = static_cast<int64_t>(target_epoch) * 1000;
+            }
+            result.ok = true;
+            result.kind = ParseKind::kAbsolute;
+            result.trigger_ms = epoch_ms;
+            ESP_LOGI(TAG, "Parse branch: relative_day_time");
+            return result;
+        }
+    }
 
     if (!is_daily && normalized.find("天") != std::string::npos && ContainsAny(normalized, {"点", "时", ":"})) {
         int days = 0;
