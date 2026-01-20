@@ -56,6 +56,32 @@ std::string BuildReminderText(const std::string& prefix, const std::string& labe
     return TruncateUtf8(text, kTextMaxChars);
 }
 
+int64_t ComputeNextDailyTrigger(int64_t now_ms, int hour, int minute) {
+    time_t now_sec = static_cast<time_t>(now_ms / 1000);
+    std::tm target_tm = {};
+    if (localtime_r(&now_sec, &target_tm) == nullptr) {
+        return now_ms;
+    }
+    target_tm.tm_hour = hour;
+    target_tm.tm_min = minute;
+    target_tm.tm_sec = 0;
+    target_tm.tm_isdst = -1;
+    time_t target_epoch = mktime(&target_tm);
+    if (target_epoch < 0) {
+        return now_ms;
+    }
+    int64_t epoch_ms = static_cast<int64_t>(target_epoch) * 1000;
+    if (epoch_ms <= now_ms) {
+        target_tm.tm_mday += 1;
+        target_epoch = mktime(&target_tm);
+        if (target_epoch < 0) {
+            return now_ms;
+        }
+        epoch_ms = static_cast<int64_t>(target_epoch) * 1000;
+    }
+    return epoch_ms;
+}
+
 }
 
 AlarmTool& AlarmTool::GetInstance() {
@@ -79,15 +105,23 @@ void AlarmTool::Initialize() {
 
     const int64_t now_ms = GetNowMs();
     bool removed_expired = false;
+    bool updated_daily = false;
     for (auto it = alarms_.begin(); it != alarms_.end(); ) {
-        if (it->second.trigger_ms <= now_ms) {
+        if (it->second.is_daily) {
+            int64_t next_trigger = ComputeNextDailyTrigger(now_ms, it->second.hour, it->second.minute);
+            if (next_trigger != it->second.trigger_ms) {
+                it->second.trigger_ms = next_trigger;
+                updated_daily = true;
+            }
+            ++it;
+        } else if (it->second.trigger_ms <= now_ms) {
             it = alarms_.erase(it);
             removed_expired = true;
         } else {
             ++it;
         }
     }
-    if (removed_expired) {
+    if (removed_expired || updated_daily) {
         SaveAlarms(alarms_);
     }
 
@@ -177,13 +211,19 @@ ReturnValue AlarmTool::HandleSetAlarm(const PropertyList& properties) {
         throw std::runtime_error("E_TIME_PARSE(" + std::to_string(parsed.error_code) + "): " + parsed.message);
     }
 
-    if (parsed.trigger_ms <= now_ms) {
-        throw std::runtime_error("trigger time is in the past");
-    }
-
     AlarmRecord record;
-    record.trigger_ms = parsed.trigger_ms;
     record.label = label;
+    record.is_daily = parsed.is_daily;
+    if (parsed.is_daily) {
+        record.hour = parsed.hour;
+        record.minute = parsed.minute;
+        record.trigger_ms = ComputeNextDailyTrigger(now_ms, parsed.hour, parsed.minute);
+    } else {
+        record.trigger_ms = parsed.trigger_ms;
+        if (record.trigger_ms <= now_ms) {
+            throw std::runtime_error("trigger time is in the past");
+        }
+    }
 
     std::map<uint32_t, AlarmRecord> snapshot;
     {
@@ -203,6 +243,7 @@ ReturnValue AlarmTool::HandleSetAlarm(const PropertyList& properties) {
     cJSON_AddNumberToObject(root, "alarm_id", static_cast<double>(record.id));
     cJSON_AddNumberToObject(root, "trigger_epoch_ms", static_cast<double>(record.trigger_ms));
     cJSON_AddStringToObject(root, "trigger_time", TimeParser::FormatLocalTime(record.trigger_ms).c_str());
+    cJSON_AddBoolToObject(root, "is_daily", record.is_daily);
     return root;
 }
 
@@ -219,8 +260,13 @@ ReturnValue AlarmTool::HandleListAlarms(const PropertyList& properties) {
         if (!record.label.empty()) {
             cJSON_AddStringToObject(item, "label", record.label.c_str());
         }
+        if (record.is_daily) {
+            cJSON_AddNumberToObject(item, "hour", record.hour);
+            cJSON_AddNumberToObject(item, "minute", record.minute);
+        }
         cJSON_AddNumberToObject(item, "trigger_epoch_ms", static_cast<double>(record.trigger_ms));
         cJSON_AddStringToObject(item, "trigger_time", TimeParser::FormatLocalTime(record.trigger_ms).c_str());
+        cJSON_AddBoolToObject(item, "is_daily", record.is_daily);
         int64_t remaining = (record.trigger_ms - now_ms) / 1000;
         if (remaining < 0) {
             remaining = 0;
@@ -353,9 +399,16 @@ void AlarmTool::OnTimer() {
         std::lock_guard<std::mutex> lock(mutex_);
         for (auto it = alarms_.begin(); it != alarms_.end(); ) {
             if (it->second.trigger_ms <= now_ms) {
-                due_alarms.push_back(it->second);
-                it = alarms_.erase(it);
-                save_needed = true;
+                if (it->second.is_daily) {
+                    due_alarms.push_back(it->second);
+                    it->second.trigger_ms = ComputeNextDailyTrigger(now_ms, it->second.hour, it->second.minute);
+                    save_needed = true;
+                    ++it;
+                } else {
+                    due_alarms.push_back(it->second);
+                    it = alarms_.erase(it);
+                    save_needed = true;
+                }
             } else {
                 ++it;
             }

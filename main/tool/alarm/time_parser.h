@@ -19,6 +19,9 @@ public:
         int error_code = 0;
         std::string error;
         std::string message;
+        bool is_daily = false;
+        int hour = 0;
+        int minute = 0;
     };
 
     static ParseResult Parse(const std::string& text, int64_t now_ms);

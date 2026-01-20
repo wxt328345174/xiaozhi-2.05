@@ -9,6 +9,9 @@ struct AlarmRecord {
     uint32_t id = 0;
     int64_t trigger_ms = 0;
     std::string label;
+    bool is_daily = false;
+    int hour = 0;
+    int minute = 0;
 };
 
 class AlarmStore {
