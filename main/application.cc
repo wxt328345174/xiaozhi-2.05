@@ -835,6 +835,17 @@ void Application::WakeWordInvoke(const std::string& wake_word) {
     }
 }
 
+void Application::SendWakeWordDetectedText(const std::string& text) {
+    if (!protocol_) {
+        return;
+    }
+    if (device_state_ == kDeviceStateListening) {
+        protocol_->SendWakeWordDetected(text);
+    } else {
+        WakeWordInvoke(text);
+    }
+}
+
 bool Application::CanEnterSleepMode() {
     if (device_state_ != kDeviceStateIdle) {
         return false;

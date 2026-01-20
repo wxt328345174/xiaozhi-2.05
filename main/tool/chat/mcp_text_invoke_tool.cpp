@@ -251,7 +251,7 @@ bool TextInvokeTool::SendViaWakeWordPath(const std::string& text) {
     std::string escaped = EscapeJsonString(text);
     auto& app = Application::GetInstance();
     app.Schedule([escaped]() {
-        Application::GetInstance().WakeWordInvoke(escaped);
+        Application::GetInstance().SendWakeWordDetectedText(escaped);
     });
     ESP_LOGI(TAG, "SendViaWakeWordPath scheduled, len=%u", static_cast<unsigned>(text.size()));
     return true;
