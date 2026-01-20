@@ -593,6 +593,8 @@ TimeParser::ParseResult TimeParser::Parse(const std::string& text, int64_t now_m
             result.ok = true;
             result.kind = ParseKind::kAbsolute;
             result.trigger_ms = epoch_ms;
+            result.hour = hour;
+            result.minute = minute;
             ESP_LOGI(TAG, "Parse branch: relative_day_time");
             return result;
         }
@@ -643,6 +645,8 @@ TimeParser::ParseResult TimeParser::Parse(const std::string& text, int64_t now_m
             result.ok = true;
             result.kind = ParseKind::kDayTimeRelative;
             result.trigger_ms = epoch_ms;
+            result.hour = hour;
+            result.minute = minute;
             ESP_LOGI(TAG, "Parse branch: day_offset_time");
             return result;
         }
@@ -689,6 +693,8 @@ TimeParser::ParseResult TimeParser::Parse(const std::string& text, int64_t now_m
         result.ok = true;
         result.kind = ParseKind::kAbsolute;
         result.trigger_ms = epoch_ms;
+        result.hour = hour;
+        result.minute = minute;
         ESP_LOGI(TAG, "Parse branch: absolute(date + time)");
         return result;
     }
@@ -745,6 +751,8 @@ TimeParser::ParseResult TimeParser::Parse(const std::string& text, int64_t now_m
         result.ok = true;
         result.kind = ParseKind::kAbsolute;
         result.trigger_ms = epoch_ms;
+        result.hour = hour;
+        result.minute = minute;
         ESP_LOGI(TAG, "Parse branch: time_only");
         return result;
     }
