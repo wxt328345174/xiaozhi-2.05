@@ -112,6 +112,9 @@ void AlarmTool::Initialize() {
         alarms_.clear();
         next_alarm_id_ = 1;
     }
+    ESP_LOGI(TAG, "Alarm store loaded: count=%u next_id=%u",
+        static_cast<unsigned>(alarms_.size()),
+        static_cast<unsigned>(next_alarm_id_));
 
     const int64_t now_ms = GetNowMs();
     bool removed_expired = false;
@@ -144,7 +147,7 @@ void AlarmTool::Initialize() {
         });
 
     mcp_server.AddTool("alarm.set_alarm",
-        "Set an alarm with time_text and optional label. Use repeat=DAILY when user says every day.",
+        "Set an alarm with time_text and optional label. Use repeat=DAILY when user says every day (even if time_text is normalized).",
         PropertyList({
             Property("time_text", kPropertyTypeString),
             Property("label", kPropertyTypeString, ""),
@@ -238,6 +241,9 @@ ReturnValue AlarmTool::HandleSetAlarm(const PropertyList& properties) {
     record.label = label;
     const bool is_daily_final = (repeat_upper == "DAILY") || parsed.is_daily;
     record.is_daily = is_daily_final;
+    if (is_daily_final && parsed.kind == TimeParser::ParseKind::kRelative) {
+        throw std::runtime_error("daily alarm requires time-of-day, not duration");
+    }
     if (is_daily_final) {
         record.hour = parsed.hour;
         record.minute = parsed.minute;
