@@ -5,6 +5,7 @@
 
 - 获取当前本地时间与同步状态
 - 设置闹钟、列出闹钟、删除闹钟（一次性闹钟）
+- 支持每日重复闹钟
 - 设置/取消/查询倒计时
 - 触发时调用 `self.text_invoke(text=..., max_len=10)`，确保每片 <= 10 字节
 
@@ -33,7 +34,8 @@
 {
   "alarm_id": 1,
   "trigger_epoch_ms": 1737340860000,
-  "trigger_time": "2025-01-20 12:01:00"
+  "trigger_time": "2025-01-20 12:01:00",
+  "is_daily": false
 }
 ```
 
@@ -46,8 +48,11 @@
   {
     "id": 1,
     "label": "喝水",
+    "hour": 7,
+    "minute": 30,
     "trigger_epoch_ms": 1737340860000,
     "trigger_time": "2025-01-20 12:01:00",
+    "is_daily": true,
     "remaining_sec": 42
   }
 ]
@@ -119,6 +124,9 @@
 - 特殊规则：
   - “X天X点X分” 解析为 “X 天后 + 当天 X 点 X 分”
     - 若 X 天为 0 且该时间已过去，则自动顺延到下一天
+- 每日闹钟：
+  - “每天/每日 + 时间” 解析为每天重复
+  - 支持 “每天上午10点半”“每日晚上9点”“每天 7:30”
 
 ## 4. 触发提醒与 10 字节限制
 闹钟/倒计时触发后会调用：
@@ -141,6 +149,7 @@ self.text_invoke(text=..., max_len=10)
 alarm.set_alarm { "time_text": "10分钟后", "label": "喝水" }
 alarm.set_alarm { "time_text": "3月15日 8点30分", "label": "起床" }
 alarm.set_alarm { "time_text": "2天8点0分", "label": "复诊" }
+alarm.set_alarm { "time_text": "每天上午10点半", "label": "点外卖" }
 ```
 
 结构化：

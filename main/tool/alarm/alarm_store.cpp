@@ -42,6 +42,9 @@ bool AlarmStore::Load(std::map<uint32_t, AlarmRecord>& alarms, uint32_t& next_id
         cJSON* id = cJSON_GetObjectItem(item, "id");
         cJSON* trigger_ms = cJSON_GetObjectItem(item, "trigger_ms");
         cJSON* label = cJSON_GetObjectItem(item, "label");
+        cJSON* is_daily = cJSON_GetObjectItem(item, "is_daily");
+        cJSON* hour = cJSON_GetObjectItem(item, "hour");
+        cJSON* minute = cJSON_GetObjectItem(item, "minute");
         if (!cJSON_IsNumber(id) || !cJSON_IsNumber(trigger_ms)) {
             continue;
         }
@@ -50,6 +53,15 @@ bool AlarmStore::Load(std::map<uint32_t, AlarmRecord>& alarms, uint32_t& next_id
         record.trigger_ms = static_cast<int64_t>(trigger_ms->valuedouble);
         if (cJSON_IsString(label)) {
             record.label = label->valuestring;
+        }
+        if (cJSON_IsBool(is_daily)) {
+            record.is_daily = is_daily->valueint == 1;
+        }
+        if (cJSON_IsNumber(hour)) {
+            record.hour = hour->valueint;
+        }
+        if (cJSON_IsNumber(minute)) {
+            record.minute = minute->valueint;
         }
         if (record.id == 0) {
             continue;
@@ -78,6 +90,11 @@ bool AlarmStore::Save(const std::map<uint32_t, AlarmRecord>& alarms) {
         cJSON_AddNumberToObject(item, "trigger_ms", static_cast<double>(record.trigger_ms));
         if (!record.label.empty()) {
             cJSON_AddStringToObject(item, "label", record.label.c_str());
+        }
+        if (record.is_daily) {
+            cJSON_AddBoolToObject(item, "is_daily", true);
+            cJSON_AddNumberToObject(item, "hour", record.hour);
+            cJSON_AddNumberToObject(item, "minute", record.minute);
         }
         cJSON_AddItemToArray(root, item);
     }

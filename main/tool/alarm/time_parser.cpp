@@ -462,7 +462,7 @@ void ApplyPeriodAdjust(Period period, int& hour) {
 std::string BuildSupportMessage() {
     return "支持格式: 10分钟后/2小时后/1天2小时15分钟后; "
            "3月2日7点30分/2026年03月02日07:30/3月2日早上7点半; "
-           "7:30/7点半/7点30; 2天9点30分";
+           "7:30/7点半/7点30; 2天9点30分; 每天7:30/每日晚上9点";
 }
 
 } // namespace
@@ -493,6 +493,14 @@ TimeParser::ParseResult TimeParser::Parse(const std::string& text, int64_t now_m
     ESP_LOGI(TAG, "Parse time_text raw='%s'", text.c_str());
     ESP_LOGI(TAG, "Parse time_text normalized='%s'", normalized.c_str());
 
+    bool is_daily = false;
+    if (normalized.find("每天") != std::string::npos || normalized.find("每日") != std::string::npos) {
+        is_daily = true;
+        ReplaceAll(normalized, "每天", "");
+        ReplaceAll(normalized, "每日", "");
+        ESP_LOGI(TAG, "Parse branch: daily keyword");
+    }
+
     if (normalized.find("多久后") != std::string::npos) {
         result.error_code = kErrInvalid;
         result.error = "missing duration";
@@ -507,7 +515,7 @@ TimeParser::ParseResult TimeParser::Parse(const std::string& text, int64_t now_m
     int minute = 0;
     Period period = kPeriodNone;
 
-    if (normalized.find("天") != std::string::npos && ContainsAny(normalized, {"点", "时", ":"})) {
+    if (!is_daily && normalized.find("天") != std::string::npos && ContainsAny(normalized, {"点", "时", ":"})) {
         int days = 0;
         if (ParseDayTimeOffset(normalized, days, hour, minute, &period)) {
             ApplyPeriodAdjust(period, hour);
@@ -559,7 +567,7 @@ TimeParser::ParseResult TimeParser::Parse(const std::string& text, int64_t now_m
 
     size_t date_end = 0;
     bool has_year = false;
-    if (ParseDateFromString(normalized, year, month, day, date_end, has_year)) {
+    if (!is_daily && ParseDateFromString(normalized, year, month, day, date_end, has_year)) {
         std::string time_part = normalized.substr(date_end);
         if (time_part.empty()) {
             result.error_code = kErrInvalid;
@@ -611,6 +619,15 @@ TimeParser::ParseResult TimeParser::Parse(const std::string& text, int64_t now_m
             return result;
         }
         ApplyPeriodAdjust(period, hour);
+        result.hour = hour;
+        result.minute = minute;
+        if (is_daily) {
+            result.ok = true;
+            result.kind = ParseKind::kAbsolute;
+            result.is_daily = true;
+            ESP_LOGI(TAG, "Parse branch: daily time_only");
+            return result;
+        }
         time_t now_sec = static_cast<time_t>(now_ms / 1000);
         std::tm target_tm = {};
         if (localtime_r(&now_sec, &target_tm) == nullptr) {
@@ -653,7 +670,7 @@ TimeParser::ParseResult TimeParser::Parse(const std::string& text, int64_t now_m
     if (EndsWith(duration_text, "后")) {
         duration_text.erase(duration_text.size() - std::strlen("后"));
     }
-    if (!ContainsAny(duration_text, {"年", "月", "日", "点", "时", ":"})) {
+    if (!is_daily && !ContainsAny(duration_text, {"年", "月", "日", "点", "时", ":"})) {
         int64_t duration_sec = 0;
         if (ParseDurationSeconds(duration_text, duration_sec) && duration_sec > 0) {
             result.ok = true;
@@ -662,6 +679,13 @@ TimeParser::ParseResult TimeParser::Parse(const std::string& text, int64_t now_m
             ESP_LOGI(TAG, "Parse branch: relative(duration)");
             return result;
         }
+    }
+
+    if (is_daily) {
+        result.error_code = kErrInvalid;
+        result.error = "invalid daily time";
+        result.message = "每日闹钟需要时间格式，如 每天7:30/每日晚上9点. " + BuildSupportMessage();
+        return result;
     }
 
     result.error_code = kErrUnsupported;
