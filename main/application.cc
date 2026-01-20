@@ -10,6 +10,7 @@
 #include "assets.h"
 #include "settings.h"
 #include "tool/chat/mcp_text_invoke_tool.h"
+#include "tool/alarm/alarm_tool.h"
 
 #include <cstring>
 #include <esp_log.h>
@@ -406,6 +407,7 @@ void Application::Start() {
     mcp_server.AddCommonTools();
     mcp_server.AddUserOnlyTools();
     TextInvokeTool::GetInstance().Initialize();
+    AlarmTool::GetInstance().Initialize();
 
     if (ota.HasMqttConfig()) {
         protocol_ = std::make_unique<MqttProtocol>();
