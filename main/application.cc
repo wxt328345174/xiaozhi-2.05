@@ -9,6 +9,7 @@
 #include "mcp_server.h"
 #include "assets.h"
 #include "settings.h"
+#include "tool/chat/mcp_text_invoke_tool.h"
 
 #include <cstring>
 #include <esp_log.h>
@@ -404,6 +405,7 @@ void Application::Start() {
     auto& mcp_server = McpServer::GetInstance();
     mcp_server.AddCommonTools();
     mcp_server.AddUserOnlyTools();
+    TextInvokeTool::GetInstance().Initialize();
 
     if (ota.HasMqttConfig()) {
         protocol_ = std::make_unique<MqttProtocol>();
@@ -830,6 +832,17 @@ void Application::WakeWordInvoke(const std::string& wake_word) {
                 protocol_->CloseAudioChannel();
             }
         });
+    }
+}
+
+void Application::SendWakeWordDetectedText(const std::string& text) {
+    if (!protocol_) {
+        return;
+    }
+    if (device_state_ == kDeviceStateListening) {
+        protocol_->SendWakeWordDetected(text);
+    } else {
+        WakeWordInvoke(text);
     }
 }
 
