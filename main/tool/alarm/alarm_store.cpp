@@ -12,6 +12,7 @@ namespace {
 static const char* TAG = "AlarmStore";
 static const char* kNamespace = "alarm";
 static const char* kKeyAlarms = "alarms";
+static const size_t kLogChunkSize = 160;
 
 }
 
@@ -106,4 +107,18 @@ bool AlarmStore::Save(const std::map<uint32_t, AlarmRecord>& alarms) {
     }
     cJSON_Delete(root);
     return true;
+}
+
+void AlarmStore::DumpRaw() {
+    Settings settings(kNamespace, false);
+    std::string payload = settings.GetString(kKeyAlarms, "");
+    ESP_LOGI(TAG, "Alarm raw dump: key=%s len=%u", kKeyAlarms, static_cast<unsigned>(payload.size()));
+    if (payload.empty()) {
+        return;
+    }
+
+    for (size_t offset = 0; offset < payload.size(); offset += kLogChunkSize) {
+        std::string chunk = payload.substr(offset, kLogChunkSize);
+        ESP_LOGI(TAG, "Alarm raw dump chunk: %s", chunk.c_str());
+    }
 }

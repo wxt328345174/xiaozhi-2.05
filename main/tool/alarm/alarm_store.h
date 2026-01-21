@@ -18,6 +18,7 @@ class AlarmStore {
 public:
     bool Load(std::map<uint32_t, AlarmRecord>& alarms, uint32_t& next_id);
     bool Save(const std::map<uint32_t, AlarmRecord>& alarms);
+    void DumpRaw();
 };
 
 #endif // ALARM_STORE_H
