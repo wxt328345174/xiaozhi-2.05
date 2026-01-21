@@ -23,6 +23,11 @@ public:
         int hour = 0;
         int minute = 0;
         bool has_daily_keyword = false;
+        bool used_period = false;
+        bool default_am = false;
+        bool is_24h = false;
+        bool period_adjusted = false;
+        bool ambiguous = false;
     };
 
     static ParseResult Parse(const std::string& text, int64_t now_ms);

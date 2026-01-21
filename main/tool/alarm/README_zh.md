@@ -11,6 +11,8 @@
 - `alarm.get_time`：获取本地时间与同步状态
 - `alarm.set_alarm(time_text, label?, repeat?)`
   - `repeat`: `NONE`（默认）或 `DAILY`（仅当用户明确“每天/每日”时使用）
+  - `period`/`meridiem`（可选）：仅当用户明确说出上午/下午/晚上或 AM/PM 时传
+  - `raw_time_text`（可选）：用户原始时间短语，用于歧义纠正（如 “10点半”）
 - `alarm.list_alarms`：返回结构化列表（含 `repeat_type` 与 `display`）
 - `alarm.delete_alarm(id)`
 - `alarm.set_countdown(time_text, label?)`：仅支持相对时长
@@ -29,6 +31,11 @@
 - `每天/每日 + 时间`
 - 如 `每天上午10点半`、`每日晚上9点`、`每天 7:30`
 - 若 LLM 把 `time_text` 规范为 `14:43`，需传 `repeat="DAILY"`
+
+歧义规则：
+- 1-12 点且无时段词时默认 AM（`10点半` => 10:30）
+- 13-23 点或 `22点/22:30` 按 24 小时制
+- 只有明确“下午/晚上/PM”才会转为 22:30
 
 特殊规则：
 - `X天X点X分` 解析为 “X 天后 + 当天 X 点 X 分”（当天已过则顺延）
