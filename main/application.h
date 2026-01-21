@@ -32,6 +32,8 @@ enum AecMode {
     kAecOnServerSide,
 };
 
+class TvTool;
+
 class Application {
 public:
     static Application& GetInstance() {
@@ -79,6 +81,7 @@ private:
     AecMode aec_mode_ = kAecOff;
     std::string last_error_message_;
     AudioService audio_service_;
+    TvTool* tv_tool_ = nullptr;
 
     bool has_server_time_ = false;
     bool aborted_ = false;
