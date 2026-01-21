@@ -228,6 +228,7 @@ enum Period {
 };
 
 Period ExtractPeriod(std::string& text) {
+    ToLowerAscii(text);
     if (text.find("早上") != std::string::npos || text.find("上午") != std::string::npos) {
         ReplaceAll(text, "早上", "");
         ReplaceAll(text, "上午", "");
@@ -244,6 +245,16 @@ Period ExtractPeriod(std::string& text) {
     if (text.find("晚上") != std::string::npos) {
         ReplaceAll(text, "晚上", "");
         return kPeriodEvening;
+    }
+    if (text.find("p.m.") != std::string::npos || text.find("pm") != std::string::npos) {
+        ReplaceAll(text, "p.m.", "");
+        ReplaceAll(text, "pm", "");
+        return kPeriodEvening;
+    }
+    if (text.find("a.m.") != std::string::npos || text.find("am") != std::string::npos) {
+        ReplaceAll(text, "a.m.", "");
+        ReplaceAll(text, "am", "");
+        return kPeriodMorning;
     }
     return kPeriodNone;
 }
@@ -465,13 +476,27 @@ void ApplyPeriodAdjust(Period period, int& hour) {
     }
 }
 
+void FillTimeMeta(TimeParser::ParseResult& result, int hour_before, int hour_after, Period period) {
+    result.used_period = period != kPeriodNone;
+    result.is_24h = hour_before >= 13;
+    result.default_am = (!result.used_period && hour_before <= 12);
+    result.period_adjusted = result.used_period && hour_before != hour_after;
+    result.ambiguous = (!result.used_period && hour_before >= 1 && hour_before <= 12);
+    ESP_LOGI(TAG, "Parse time meta: hour=%d minute=%d is_24h=%d default_am=%d period_adj=%d",
+        hour_after,
+        result.minute,
+        result.is_24h ? 1 : 0,
+        result.default_am ? 1 : 0,
+        result.period_adjusted ? 1 : 0);
+}
+
 std::string BuildSupportMessage() {
     return "支持格式: 10分钟后/2小时后/1天2小时15分钟后; "
            "3月2日7点30分/2026年03月02日07:30/3月2日早上7点半; "
            "7:30/7点半/7点30; 2天9点30分; 每天7:30/每日晚上9点";
 }
 
-bool ParseRelativeDayTime(const std::string& text, int& day_offset, int& hour, int& minute) {
+bool ParseRelativeDayTime(const std::string& text, int& day_offset, int& hour, int& minute, Period* period) {
     size_t pos = 0;
     while (pos < text.size() && std::isspace(static_cast<unsigned char>(text[pos]))) {
         ++pos;
@@ -496,11 +521,13 @@ bool ParseRelativeDayTime(const std::string& text, int& day_offset, int& hour, i
     if (time_part.empty()) {
         return false;
     }
-    Period period = kPeriodNone;
-    if (!ParseTimePart(time_part, hour, minute, &period)) {
+    Period local_period = kPeriodNone;
+    if (!ParseTimePart(time_part, hour, minute, &local_period)) {
         return false;
     }
-    ApplyPeriodAdjust(period, hour);
+    if (period != nullptr) {
+        *period = local_period;
+    }
     day_offset = offset;
     return true;
 }
@@ -558,7 +585,9 @@ TimeParser::ParseResult TimeParser::Parse(const std::string& text, int64_t now_m
 
     {
         int day_offset = 0;
-        if (ParseRelativeDayTime(normalized, day_offset, hour, minute)) {
+        if (ParseRelativeDayTime(normalized, day_offset, hour, minute, &period)) {
+            int hour_before = hour;
+            ApplyPeriodAdjust(period, hour);
             time_t now_sec = static_cast<time_t>(now_ms / 1000);
             std::tm target_tm = {};
             if (localtime_r(&now_sec, &target_tm) == nullptr) {
@@ -596,6 +625,7 @@ TimeParser::ParseResult TimeParser::Parse(const std::string& text, int64_t now_m
             result.trigger_ms = epoch_ms;
             result.hour = hour;
             result.minute = minute;
+            FillTimeMeta(result, hour_before, hour, period);
             ESP_LOGI(TAG, "Parse branch: relative_day_time");
             return result;
         }
@@ -604,6 +634,7 @@ TimeParser::ParseResult TimeParser::Parse(const std::string& text, int64_t now_m
     if (!is_daily && normalized.find("天") != std::string::npos && ContainsAny(normalized, {"点", "时", ":"})) {
         int days = 0;
         if (ParseDayTimeOffset(normalized, days, hour, minute, &period)) {
+            int hour_before = hour;
             ApplyPeriodAdjust(period, hour);
             if (days < 0 || !ValidateTimeParts(hour, minute)) {
                 result.error_code = kErrInvalid;
@@ -648,6 +679,7 @@ TimeParser::ParseResult TimeParser::Parse(const std::string& text, int64_t now_m
             result.trigger_ms = epoch_ms;
             result.hour = hour;
             result.minute = minute;
+            FillTimeMeta(result, hour_before, hour, period);
             ESP_LOGI(TAG, "Parse branch: day_offset_time");
             return result;
         }
@@ -669,6 +701,7 @@ TimeParser::ParseResult TimeParser::Parse(const std::string& text, int64_t now_m
             result.message = "时间部分解析失败. " + BuildSupportMessage();
             return result;
         }
+        int hour_before = hour;
         ApplyPeriodAdjust(period, hour);
         if (!ValidateTimeParts(hour, minute)) {
             result.error_code = kErrInvalid;
@@ -696,6 +729,7 @@ TimeParser::ParseResult TimeParser::Parse(const std::string& text, int64_t now_m
         result.trigger_ms = epoch_ms;
         result.hour = hour;
         result.minute = minute;
+        FillTimeMeta(result, hour_before, hour, period);
         ESP_LOGI(TAG, "Parse branch: absolute(date + time)");
         return result;
     }
@@ -708,6 +742,7 @@ TimeParser::ParseResult TimeParser::Parse(const std::string& text, int64_t now_m
             result.message = "时间部分解析失败. " + BuildSupportMessage();
             return result;
         }
+        int hour_before = hour;
         ApplyPeriodAdjust(period, hour);
         result.hour = hour;
         result.minute = minute;
@@ -715,6 +750,7 @@ TimeParser::ParseResult TimeParser::Parse(const std::string& text, int64_t now_m
             result.ok = true;
             result.kind = ParseKind::kAbsolute;
             result.is_daily = true;
+            FillTimeMeta(result, hour_before, hour, period);
             ESP_LOGI(TAG, "Parse branch: daily time_only");
             return result;
         }
@@ -754,6 +790,7 @@ TimeParser::ParseResult TimeParser::Parse(const std::string& text, int64_t now_m
         result.trigger_ms = epoch_ms;
         result.hour = hour;
         result.minute = minute;
+        FillTimeMeta(result, hour_before, hour, period);
         ESP_LOGI(TAG, "Parse branch: time_only");
         return result;
     }

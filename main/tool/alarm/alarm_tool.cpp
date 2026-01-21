@@ -67,6 +67,53 @@ std::string FormatHourMinute(int hour, int minute) {
     return std::string(buffer);
 }
 
+void ToLowerAscii(std::string& text) {
+    for (auto& ch : text) {
+        if (ch >= 'A' && ch <= 'Z') {
+            ch = static_cast<char>(ch - 'A' + 'a');
+        }
+    }
+}
+
+bool ContainsAnyToken(const std::string& text, const std::vector<std::string>& tokens) {
+    for (const auto& token : tokens) {
+        if (text.find(token) != std::string::npos) {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool HasPeriodToken(const std::string& text) {
+    std::string lowered = text;
+    ToLowerAscii(lowered);
+    return ContainsAnyToken(lowered, {"早上", "上午", "中午", "下午", "晚上", "am", "pm"});
+}
+
+std::string NormalizePeriodParam(const std::string& period, const std::string& meridiem) {
+    std::string value = period;
+    if (value.empty()) {
+        value = meridiem;
+    }
+    std::string lowered = value;
+    ToLowerAscii(lowered);
+    if (lowered == "am" || lowered == "上午" || lowered == "早上") {
+        return "上午";
+    }
+    if (lowered == "pm" || lowered == "下午" || lowered == "晚上" || lowered == "夜晚" || lowered == "傍晚") {
+        return "晚上";
+    }
+    if (lowered == "中午") {
+        return "中午";
+    }
+    return "";
+}
+
+bool IsTimeOnlyInput(const std::string& text) {
+    return !ContainsAnyToken(text, {"年", "月", "日", "天", "今天", "明天", "后天"}) &&
+        ContainsAnyToken(text, {":", "点", "时", "半"});
+}
+
 int64_t ComputeNextDailyTrigger(int64_t now_ms, int hour, int minute) {
     time_t now_sec = static_cast<time_t>(now_ms / 1000);
     std::tm target_tm = {};
@@ -148,11 +195,16 @@ void AlarmTool::Initialize() {
         });
 
     mcp_server.AddTool("alarm.set_alarm",
-        "Set an alarm with time_text and optional label. repeat=DAILY only when user explicitly says 每天/每日 (not for plain time-only).",
+        "Set an alarm with time_text and optional label. repeat=DAILY only when user explicitly says 每天/每日 (not for plain time-only). "
+        "Ambiguity: 1-12 without period defaults to AM; 13-23 is 24h. "
+        "Optional period/meridiem only when user says 上午/下午/晚上 or AM/PM.",
         PropertyList({
             Property("time_text", kPropertyTypeString),
             Property("label", kPropertyTypeString, ""),
-            Property("repeat", kPropertyTypeString, "NONE")
+            Property("repeat", kPropertyTypeString, "NONE"),
+            Property("period", kPropertyTypeString, ""),
+            Property("meridiem", kPropertyTypeString, ""),
+            Property("raw_time_text", kPropertyTypeString, "")
         }),
         [this](const PropertyList& properties) -> ReturnValue {
             return HandleSetAlarm(properties);
@@ -220,13 +272,24 @@ ReturnValue AlarmTool::HandleSetAlarm(const PropertyList& properties) {
     auto time_text = properties["time_text"].value<std::string>();
     auto label = properties["label"].value<std::string>();
     auto repeat = properties["repeat"].value<std::string>();
+    auto period = properties["period"].value<std::string>();
+    auto meridiem = properties["meridiem"].value<std::string>();
+    auto raw_time_text = properties["raw_time_text"].value<std::string>();
 
     int64_t now_ms = GetNowMs();
-    ESP_LOGI(TAG, "Alarm set request: time_text='%s' label='%s' repeat='%s'",
+    ESP_LOGI(TAG, "Alarm set request: time_text='%s' label='%s' repeat='%s' period='%s' meridiem='%s' raw_time_text='%s'",
         time_text.c_str(),
         label.c_str(),
-        repeat.c_str());
-    auto parsed = TimeParser::Parse(time_text, now_ms);
+        repeat.c_str(),
+        period.c_str(),
+        meridiem.c_str(),
+        raw_time_text.c_str());
+    std::string parse_text = time_text;
+    std::string period_prefix = NormalizePeriodParam(period, meridiem);
+    if (!period_prefix.empty() && !HasPeriodToken(parse_text)) {
+        parse_text = period_prefix + parse_text;
+    }
+    auto parsed = TimeParser::Parse(parse_text, now_ms);
     if (!parsed.ok) {
         throw std::runtime_error("E_TIME_PARSE(" + std::to_string(parsed.error_code) + "): " + parsed.message);
     }
@@ -237,6 +300,29 @@ ReturnValue AlarmTool::HandleSetAlarm(const PropertyList& properties) {
             ch = static_cast<char>(ch - 'a' + 'A');
         }
     }
+
+    bool corrected = false;
+    if (IsTimeOnlyInput(time_text) && !raw_time_text.empty()) {
+        auto raw_parsed = TimeParser::Parse(raw_time_text, now_ms);
+        if (raw_parsed.ok && raw_parsed.default_am && !raw_parsed.used_period && raw_parsed.hour >= 1 && raw_parsed.hour <= 12) {
+            if (parsed.is_24h && parsed.hour >= 13) {
+                parsed.hour = raw_parsed.hour;
+                parsed.minute = raw_parsed.minute;
+                parsed.trigger_ms = ComputeNextDailyTrigger(now_ms, parsed.hour, parsed.minute);
+                corrected = true;
+            }
+        }
+    }
+    if (corrected) {
+        ESP_LOGI(TAG, "Alarm time corrected: raw_time_text='%s' corrected_time=%s",
+            raw_time_text.c_str(),
+            FormatHourMinute(parsed.hour, parsed.minute).c_str());
+    }
+    ESP_LOGI(TAG, "Alarm time meta: is_24h=%d default_am=%d period_adj=%d corrected=%d",
+        parsed.is_24h ? 1 : 0,
+        parsed.default_am ? 1 : 0,
+        parsed.period_adjusted ? 1 : 0,
+        corrected ? 1 : 0);
 
     AlarmRecord record;
     record.label = label;
@@ -305,6 +391,8 @@ ReturnValue AlarmTool::HandleListAlarms(const PropertyList& properties) {
     (void)properties;
     cJSON* root = cJSON_CreateArray();
     int64_t now_ms = GetNowMs();
+
+    store_.DumpRaw();
 
     std::lock_guard<std::mutex> lock(mutex_);
     std::vector<const AlarmRecord*> daily_records;
