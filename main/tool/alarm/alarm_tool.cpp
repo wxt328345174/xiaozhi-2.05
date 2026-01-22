@@ -14,6 +14,8 @@ namespace {
 static const char* TAG = "AlarmTool";
 static const size_t kMaxAlarms = 16;
 static const size_t kTextMaxChars = 10;
+static const char* kTemplatePrefix = "【闹钟助手】该";
+static const char* kTemplateSuffix = "了";
 
 size_t Utf8CharLen(unsigned char ch) {
     if ((ch & 0x80) == 0x00) {
@@ -48,13 +50,37 @@ std::string TruncateUtf8(const std::string& text, size_t max_chars) {
     return text.substr(0, offset);
 }
 
-std::string BuildReminderText(const std::string& prefix, const std::string& label) {
-    std::string text = prefix;
-    if (!label.empty()) {
-        text += ":";
-        text += label;
+size_t CountUtf8Chars(const std::string& text) {
+    size_t count = 0;
+    size_t offset = 0;
+    while (offset < text.size()) {
+        size_t len = Utf8CharLen(static_cast<unsigned char>(text[offset]));
+        if (offset + len > text.size()) {
+            break;
+        }
+        offset += len;
+        count++;
     }
-    return TruncateUtf8(text, kTextMaxChars);
+    return count;
+}
+
+// Fixed template to avoid being treated as a new task by LLM: "到点:" + label, <=10 chars.
+std::string BuildReminderText(const std::string& label) {
+    const std::string prefix = kTemplatePrefix;
+    const std::string suffix = kTemplateSuffix;
+    size_t prefix_chars = CountUtf8Chars(prefix);
+    size_t suffix_chars = CountUtf8Chars(suffix);
+    size_t remaining = 0;
+    if (kTextMaxChars > prefix_chars + suffix_chars) {
+        remaining = kTextMaxChars - prefix_chars - suffix_chars;
+    }
+    std::string trimmed_label = TruncateUtf8(label, remaining);
+
+    // If no label or label gets truncated to empty, fall back to固定文案以避免命令语气
+    if (trimmed_label.empty()) {
+        return "【闹钟助手】到点了";
+    }
+    return prefix + trimmed_label + suffix;
 }
 
 std::string RepeatTypeString(bool is_daily) {
@@ -197,7 +223,8 @@ void AlarmTool::Initialize() {
     mcp_server.AddTool("alarm.set_alarm",
         "Set an alarm with time_text and optional label. repeat=DAILY only when user explicitly says 每天/每日 (not for plain time-only). "
         "Ambiguity: 1-12 without period defaults to AM; 13-23 is 24h. "
-        "Optional period/meridiem only when user says 上午/下午/晚上 or AM/PM.",
+        "Optional period/meridiem only when user says 上午/下午/晚上 or AM/PM. "
+        "Trigger text is a fixed reminder broadcast (非对话)，不要引导设置新闹钟。",
         PropertyList({
             Property("time_text", kPropertyTypeString),
             Property("label", kPropertyTypeString, ""),
@@ -227,7 +254,7 @@ void AlarmTool::Initialize() {
         });
 
     mcp_server.AddTool("alarm.set_countdown",
-        "Set a countdown timer",
+        "Set a countdown timer. Trigger text is a fixed reminder broadcast (非对话)，不要引导设置新闹钟/倒计时。",
         PropertyList({
             Property("time_text", kPropertyTypeString),
             Property("label", kPropertyTypeString, "")
@@ -366,14 +393,7 @@ ReturnValue AlarmTool::HandleSetAlarm(const PropertyList& properties) {
     SaveAlarms(snapshot);
     ScheduleNext();
 
-    std::string preview_text;
-    if (record.is_daily) {
-        preview_text = BuildReminderText("每日闹钟", record.label);
-    } else if (record.label.empty()) {
-        preview_text = BuildReminderText("闹钟到时", "");
-    } else {
-        preview_text = BuildReminderText("闹钟", record.label);
-    }
+    std::string preview_text = BuildReminderText(record.label);
     ESP_LOGI(TAG, "Alarm preview text: %s", preview_text.c_str());
 
     cJSON* root = cJSON_CreateObject();
@@ -511,12 +531,7 @@ ReturnValue AlarmTool::HandleSetCountdown(const PropertyList& properties) {
 
     ScheduleNext();
 
-    std::string preview_text;
-    if (item.label.empty()) {
-        preview_text = BuildReminderText("倒计时到时", "");
-    } else {
-        preview_text = BuildReminderText("倒计时", item.label);
-    }
+    std::string preview_text = BuildReminderText(item.label);
     ESP_LOGI(TAG, "Countdown preview text: %s", preview_text.c_str());
 
     cJSON* root = cJSON_CreateObject();
@@ -677,27 +692,24 @@ void AlarmTool::ScheduleNext() {
 }
 
 void AlarmTool::TriggerAlarm(const AlarmRecord& alarm) {
-    std::string text;
-    if (alarm.label.empty()) {
-        text = BuildReminderText("闹钟到时", "");
-    } else {
-        text = BuildReminderText("闹钟", alarm.label);
-    }
+    std::string text = BuildReminderText(alarm.label);
+    size_t chars = CountUtf8Chars(text);
     TextInvokeTool::GetInstance().Submit(text);
-    ESP_LOGI(TAG, "Alarm triggered: id=%u repeat=%s",
+    ESP_LOGI(TAG, "Alarm triggered: id=%u repeat=%s text=%s chars=%zu",
         static_cast<unsigned>(alarm.id),
-        RepeatTypeString(alarm.is_daily).c_str());
+        RepeatTypeString(alarm.is_daily).c_str(),
+        text.c_str(),
+        chars);
 }
 
 void AlarmTool::TriggerCountdown(const CountdownItem& countdown) {
-    std::string text;
-    if (countdown.label.empty()) {
-        text = BuildReminderText("倒计时到时", "");
-    } else {
-        text = BuildReminderText("倒计时", countdown.label);
-    }
+    std::string text = BuildReminderText(countdown.label);
+    size_t chars = CountUtf8Chars(text);
     TextInvokeTool::GetInstance().Submit(text);
-    ESP_LOGI(TAG, "Countdown triggered: id=%u", static_cast<unsigned>(countdown.id));
+    ESP_LOGI(TAG, "Countdown triggered: id=%u text=%s chars=%zu",
+        static_cast<unsigned>(countdown.id),
+        text.c_str(),
+        chars);
 }
 
 void AlarmTool::SaveAlarms(const std::map<uint32_t, AlarmRecord>& snapshot) {
