@@ -1,56 +1,34 @@
 # 闹钟 MCP 工具说明（中文）
 
-## 1. 能力概述
-`alarm.*` 提供本地闹钟与倒计时能力，触发时通过 `self.text_invoke` 走 LLM 回复的“伪提醒”链路。
-
+## 1. 能力
 - 一次性闹钟 / 每日闹钟 / 倒计时
-- 列出/删除闹钟
-- 提醒文本自动裁剪为 <=10 个字符（UTF-8 字符数）
+- 列出 / 删除闹钟
+- 触发走 `self.text_invoke` 播报（文本裁剪为 ≤10 个 UTF-8 字符）
 
-## 2. MCP 工具
-- `alarm.get_time`：获取本地时间与同步状态
-- `alarm.set_alarm(time_text, label?, repeat?)`
-  - `repeat`: `NONE`（默认）或 `DAILY`（仅当用户明确“每天/每日”时使用）
-  - `period`/`meridiem`（可选）：仅当用户明确说出上午/下午/晚上或 AM/PM 时传
-  - `raw_time_text`（可选）：用户原始时间短语，用于歧义纠正（如 “10点半”）
-- `alarm.list_alarms`：返回结构化列表（含 `repeat_type` 与 `display`）
+## 2. 工具与参数
+- `alarm.get_time`
+- `alarm.set_alarm(time_text, label?, repeat?, period?, meridiem?, raw_time_text?)`
+  - `repeat`: `NONE`（默认）或 `DAILY`（仅当用户明确“每天/每日”）
+  - `period`/`meridiem`: 仅在用户说上午/下午/晚上或 AM/PM 时填写
+  - `raw_time_text`: 用户原始时间短语，用于歧义纠正
+- `alarm.list_alarms`（含 `repeat_type`、`display`）
 - `alarm.delete_alarm(id)`
-- `alarm.set_countdown(time_text, label?)`：仅支持相对时长
+- `alarm.set_countdown(time_text, label?)`（仅相对时长）
 - `alarm.get_countdown` / `alarm.cancel_countdown`
 
-## 3. time_text 支持格式
-相对时间：
-- `10分钟后` / `2小时后` / `1天后` / `1小时30分钟后`
-- 英文/缩写：`10s` / `5m` / `2h15m` / `after 1 day` / `in 5 minutes`
+## 3. time_text 规则（摘要）
+- 相对：`10分钟后`/`2小时后`/`1天后`/`1小时30分钟后`，`10s`/`5m`/`2h15m`/`after 1 day`
+- 绝对：`3月15日 8点30分`、`2025-03-15 08:30`、`今天 7:30`、`明天14:50`、`后天 9点半`
+- 每日：`每天/每日 + 时间`，如 `每天上午10点半`、`每日晚上9点`、`每天 7:30`；若被规范成 `14:43` 需传 `repeat="DAILY"`
+- 歧义规则：1–12 点且无时段词默认 AM；13–23 点按 24h；只有明确下午/晚上/PM 才 +12
 
-绝对时间：
-- `3月15日 8点30分` / `2025-03-15 08:30`
-- `今天 7:30` / `明天14:50` / `后天 9点半`
+## 4. 提醒文本（WakeWordPath 注入）
+- 固定模板：`【闹钟助手】该` + label + `了`（label 为空则 `【闹钟助手】到点了`），总长 ≤10 个字符（UTF-8 字符数）
+- 示例：`【闹钟助手】该吃饭了` / `【闹钟助手】该喝水了` / `【闹钟助手】该开会了` / `【闹钟助手】到点了` / `【闹钟助手】该休息了`
+- 仅发送一条 `text`，不分片，避免触发新对话/设置引导
 
-每日闹钟：
-- `每天/每日 + 时间`
-- 如 `每天上午10点半`、`每日晚上9点`、`每天 7:30`
-- 若 LLM 把 `time_text` 规范为 `14:43`，需传 `repeat="DAILY"`
-
-歧义规则：
-- 1-12 点且无时段词时默认 AM（`10点半` => 10:30）
-- 13-23 点或 `22点/22:30` 按 24 小时制
-- 只有明确“下午/晚上/PM”才会转为 22:30
-
-特殊规则：
-- `X天X点X分` 解析为 “X 天后 + 当天 X 点 X 分”（当天已过则顺延）
-
-## 4. 提醒文本与限制
-触发时调用：
-```
-self.text_invoke(text=...)
-```
-提醒文本会裁剪为 <=10 个字符（UTF-8 字符数），避免分片干扰对话。
-
-## 5. 返回字段
-- `alarm_id` / `countdown_id`：唯一标识
-- `repeat_type`：`NONE` 或 `DAILY`
-- `display`：面向 UI/LLM 的摘要文本（如 “每天 07:30 喝水（下次：...）”）
+## 5. 持久化
+- 闹钟列表存 NVS（namespace `alarm`, key `alarms`）；倒计时不持久化
 
 ## 6. 例子
 ```
@@ -61,19 +39,11 @@ alarm.set_alarm { "time_text": "14:43", "label": "点外卖", "repeat": "DAILY" 
 alarm.set_countdown { "time_text": "10s", "label": "喝水" }
 ```
 
-## 7. 持久化
-- 闹钟列表存 NVS（namespace: `alarm`, key: `alarms`）
-- 倒计时不持久化，重启后清空
+## 7. 已知限制 / 排错
+- `E_TIME_PARSE(*)`：输入时间不符合格式
+- DAILY 需时间点，不支持纯时长
+- INFO 日志可查：入参、解析分支、保存结果、触发/重排、NVS 加载
 
-## 8. 已知限制与排错
-- `E_TIME_PARSE(*)`：输入时间无法解析
-- DAILY 闹钟需要“时间点”，不支持纯时长（如 `10分钟后`）
-- INFO 日志覆盖：入参、解析分支、保存结果、触发/重排、持久化加载
-
-## 9. 移植策略
-新增文件（`main/tool/alarm/`）：
-- `alarm_tool.h/.cpp`、`alarm_store.h/.cpp`、`time_parser.h/.cpp`、`README_zh.md`
-
-修改原文件：
-- `main/application.cc`（初始化注册）
-- `main/CMakeLists.txt`（加入源码）
+## 8. 移植提示
+- 新增：`main/tool/alarm/` 内的 alarm_tool / alarm_store / time_parser / README
+- 修改：`main/application.cc`（注册）与 `main/CMakeLists.txt`（编译源）
