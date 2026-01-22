@@ -16,13 +16,15 @@
   - 返回值：`"stopped"` 或 `"not_running"`（本就未运行）。
 
 ## 3. 运行机制
-- 使用 `esp_timer` 周期定时器，回调仅做轻量操作：读取当前参数并调用 `Application::Schedule(...)`，把“发送文本”任务排队到主循环线程执行。
-- 发送文本通过 `Application::SendWakeWordDetectedText(utterance)` 走与 `self.text_invoke` 相同的唤醒词通道，避免在 timer 线程做网络/音频操作，也避免长任务多次回包。
+- 使用 `esp_timer` 单次定时器：发起一次解说后等待结束（speaking→idle/listening）再按 `interval_ms` 重新启动下一轮，避免固定 5s 周期叠加导致 AFE/MQTT/HTTP 拥塞。
+- 定时回调仅做轻量操作，所有发送都通过 `Application::Schedule(...)` 排队到主循环线程；发送文本走 `Application::SendWakeWordDetectedText(utterance)`，与 `self.text_invoke` 通道相同。
+- 设有 `in_flight_` 防重入；并有 30s failsafe 超时，超时后清理状态并按 `interval_ms` 重试。
 
 ## 4. 重要限制
 - `interval_ms` 最小 3000 ms；如果传入更小值会被强制提升到 3000 ms。
 - `utterance` 会按 `max_chars` 以 UTF-8 字符数截断，避免截断半个多字节。
-- 运行状态依赖 `running_` 原子变量；未额外 gate 设备状态（如 speaking），若云端返回的 TTS 与本地音频冲突，需要上层策略协调。
+- 发送只在设备状态为 idle/listening 时发起；若处于 speaking 会延后 1s 再试。
+- 解说结束判定：设备状态从 speaking 切回 idle/listening；否则由 30s 超时兜底。stop 会停止并删除所有定时器，避免旧回调误触发。
 
 ## 5. 调试方法
 - 列出工具：调用 MCP `tools/list`（JSON-RPC），`result.tools` 中可看到 `self.tv.watch` / `self.tv.stop`。示例请求：

@@ -1,13 +1,16 @@
 #include "tv_tool.h"
 
 #include <esp_log.h>
-#include <vector>
 
 #include "application.h"
+#include "device_state_event.h"
 
 namespace {
 
 const char* TAG = "TvTool";
+constexpr int kMinIntervalMs = 3000;
+constexpr int kTimeoutMs = 30000;
+constexpr int kRetryBusyMs = 1000;
 
 size_t Utf8CharLen(unsigned char ch) {
     if ((ch & 0x80) == 0x00) {
@@ -42,7 +45,7 @@ std::string TruncateUtf8(const std::string& text, int max_chars) {
     return text.substr(0, offset);
 }
 
-}
+}  // namespace
 
 TvTool& TvTool::GetInstance() {
     static TvTool instance;
@@ -71,6 +74,11 @@ void TvTool::Initialize(McpServer& mcp_server, Application& application) {
         [this](const PropertyList& /*properties*/) -> ReturnValue {
             return StopWatching();
         });
+
+    auto& state_manager = DeviceStateEventManager::GetInstance();
+    state_manager.RegisterStateChangeCallback([this](DeviceState previous_state, DeviceState current_state) {
+        OnStateChanged(previous_state, current_state);
+    });
 }
 
 std::string TvTool::StartWatching(const PropertyList& properties) {
@@ -79,8 +87,8 @@ std::string TvTool::StartWatching(const PropertyList& properties) {
     parsed.utterance = properties["utterance"].value<std::string>();
     parsed.max_chars = properties["max_chars"].value<int>();
 
-    if (parsed.interval_ms < 3000) {
-        parsed.interval_ms = 3000;
+    if (parsed.interval_ms < kMinIntervalMs) {
+        parsed.interval_ms = kMinIntervalMs;
     }
     if (parsed.max_chars <= 0) {
         parsed.max_chars = 10;
@@ -90,48 +98,11 @@ std::string TvTool::StartWatching(const PropertyList& properties) {
     {
         std::lock_guard<std::mutex> lock(mutex_);
         options_ = parsed;
-
-        if (timer_ == nullptr) {
-            esp_timer_create_args_t timer_args = {
-                .callback = [](void* arg) {
-                    auto self = static_cast<TvTool*>(arg);
-                    if (!self->running_.load(std::memory_order_acquire)) {
-                        return;
-                    }
-                    Options snapshot;
-                    {
-                        std::lock_guard<std::mutex> lock(self->mutex_);
-                        snapshot = self->options_;
-                    }
-                    if (self->app_ == nullptr) {
-                        return;
-                    }
-                    auto utterance = snapshot.utterance; // copy for lambda capture
-                    self->app_->Schedule([utterance]() {
-                        Application::GetInstance().SendWakeWordDetectedText(utterance);
-                    });
-                },
-                .arg = this,
-                .name = "tv_watch_timer",
-            };
-
-            if (esp_timer_create(&timer_args, &timer_) != ESP_OK) {
-                ESP_LOGE(TAG, "Failed to create timer");
-                timer_ = nullptr;
-                return std::string("not_running");
-            }
-        } else {
-            esp_timer_stop(timer_);
-        }
-
-        if (esp_timer_start_periodic(timer_, static_cast<uint64_t>(options_.interval_ms) * 1000ULL) != ESP_OK) {
-            ESP_LOGE(TAG, "Failed to start timer");
-            running_.store(false, std::memory_order_release);
-            return std::string("not_running");
-        }
-
         running_.store(true, std::memory_order_release);
+        in_flight_.store(false, std::memory_order_release);
     }
+
+    StartNextTimerMs(0); // 立即尝试第一轮
 
     ESP_LOGI(TAG, "TV watch started: interval_ms=%d utterance=%s max_chars=%d",
         parsed.interval_ms, parsed.utterance.c_str(), parsed.max_chars);
@@ -141,14 +112,8 @@ std::string TvTool::StartWatching(const PropertyList& properties) {
 
 std::string TvTool::StopWatching() {
     bool was_running = running_.exchange(false, std::memory_order_acq_rel);
-    {
-        std::lock_guard<std::mutex> lock(mutex_);
-        if (timer_ != nullptr) {
-            esp_timer_stop(timer_);
-            esp_timer_delete(timer_);
-            timer_ = nullptr;
-        }
-    }
+    in_flight_.store(false, std::memory_order_release);
+    StopAndDeleteTimers();
 
     if (!was_running) {
         return std::string("not_running");
@@ -157,4 +122,139 @@ std::string TvTool::StopWatching() {
     ESP_LOGI(TAG, "TV watch stopped");
 
     return std::string("stopped");
+}
+
+void TvTool::StartNextTimerMs(uint64_t delay_ms) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (!running_.load(std::memory_order_acquire)) {
+        return;
+    }
+    if (timer_next_ == nullptr) {
+        esp_timer_create_args_t timer_args = {
+            .callback = [](void* arg) {
+                static_cast<TvTool*>(arg)->OnNextTimer();
+            },
+            .arg = this,
+            .name = "tv_next",
+        };
+        if (esp_timer_create(&timer_args, &timer_next_) != ESP_OK) {
+            ESP_LOGE(TAG, "Failed to create next timer");
+            return;
+        }
+    } else {
+        esp_timer_stop(timer_next_);
+    }
+    esp_timer_start_once(timer_next_, delay_ms * 1000ULL);
+}
+
+void TvTool::StartTimeoutTimerMs(uint64_t delay_ms) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (!running_.load(std::memory_order_acquire)) {
+        return;
+    }
+    if (timer_timeout_ == nullptr) {
+        esp_timer_create_args_t timer_args = {
+            .callback = [](void* arg) {
+                static_cast<TvTool*>(arg)->OnTimeoutTimer();
+            },
+            .arg = this,
+            .name = "tv_timeout",
+        };
+        if (esp_timer_create(&timer_args, &timer_timeout_) != ESP_OK) {
+            ESP_LOGE(TAG, "Failed to create timeout timer");
+            return;
+        }
+    } else {
+        esp_timer_stop(timer_timeout_);
+    }
+    esp_timer_start_once(timer_timeout_, delay_ms * 1000ULL);
+}
+
+void TvTool::StopAndDeleteTimers() {
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (timer_next_ != nullptr) {
+        esp_timer_stop(timer_next_);
+        esp_timer_delete(timer_next_);
+        timer_next_ = nullptr;
+    }
+    if (timer_timeout_ != nullptr) {
+        esp_timer_stop(timer_timeout_);
+        esp_timer_delete(timer_timeout_);
+        timer_timeout_ = nullptr;
+    }
+}
+
+void TvTool::OnNextTimer() {
+    if (!running_.load(std::memory_order_acquire)) {
+        return;
+    }
+    if (app_ == nullptr) {
+        return;
+    }
+    app_->Schedule([this]() {
+        if (!running_.load(std::memory_order_acquire)) {
+            return;
+        }
+        if (in_flight_.load(std::memory_order_acquire)) {
+            return;
+        }
+
+        auto state = app_->GetDeviceState();
+        if (state != kDeviceStateIdle && state != kDeviceStateListening) {
+            StartNextTimerMs(kRetryBusyMs);
+            return;
+        }
+
+        Options snapshot;
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            snapshot = options_;
+        }
+
+        in_flight_.store(true, std::memory_order_release);
+        StartTimeoutTimerMs(kTimeoutMs);
+
+        auto utterance = snapshot.utterance;
+        app_->SendWakeWordDetectedText(utterance);
+    });
+}
+
+void TvTool::OnTimeoutTimer() {
+    if (!running_.load(std::memory_order_acquire)) {
+        return;
+    }
+
+    in_flight_.store(false, std::memory_order_release);
+
+    uint64_t interval_ms = kMinIntervalMs;
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        interval_ms = options_.interval_ms;
+    }
+    ESP_LOGW(TAG, "TV watch timeout hit, scheduling next after %llu ms", (unsigned long long)interval_ms);
+    StartNextTimerMs(interval_ms);
+}
+
+void TvTool::OnStateChanged(DeviceState previous_state, DeviceState current_state) {
+    if (!running_.load(std::memory_order_acquire)) {
+        return;
+    }
+
+    if (previous_state == kDeviceStateSpeaking &&
+        (current_state == kDeviceStateIdle || current_state == kDeviceStateListening)) {
+        in_flight_.store(false, std::memory_order_release);
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            if (timer_timeout_ != nullptr) {
+                esp_timer_stop(timer_timeout_);
+            }
+        }
+
+        uint64_t interval_ms = kMinIntervalMs;
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            interval_ms = options_.interval_ms;
+        }
+        StartNextTimerMs(interval_ms);
+    }
 }

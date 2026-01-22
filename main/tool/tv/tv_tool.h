@@ -6,6 +6,7 @@
 #include <string>
 
 #include "esp_timer.h"
+#include "device_state.h"
 #include "mcp_server.h"
 
 class Application;
@@ -31,10 +32,20 @@ private:
     std::string StartWatching(const PropertyList& properties);
     std::string StopWatching();
 
+    void StartNextTimerMs(uint64_t delay_ms);
+    void StartTimeoutTimerMs(uint64_t delay_ms);
+    void StopAndDeleteTimers();
+
+    void OnNextTimer();
+    void OnTimeoutTimer();
+    void OnStateChanged(DeviceState previous_state, DeviceState current_state);
+
     std::mutex mutex_;
     std::atomic<bool> running_{false};
+    std::atomic<bool> in_flight_{false};
     Options options_;
-    esp_timer_handle_t timer_ = nullptr;
+    esp_timer_handle_t timer_next_ = nullptr;
+    esp_timer_handle_t timer_timeout_ = nullptr;
     Application* app_ = nullptr;
 };
 
