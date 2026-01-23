@@ -1,7 +1,6 @@
 #include "mcp_text_invoke_tool.h"
 
 #include <cstdio>
-#include <vector>
 
 #include "application.h"
 #include "device_state_event.h"
@@ -13,47 +12,6 @@ namespace {
 
 static const char* TAG = "TextInvokeTool";
 static const int kMaxSendRetries = 1;
-
-size_t Utf8CharLen(unsigned char ch) {
-    if ((ch & 0x80) == 0x00) {
-        return 1;
-    }
-    if ((ch & 0xE0) == 0xC0) {
-        return 2;
-    }
-    if ((ch & 0xF0) == 0xE0) {
-        return 3;
-    }
-    if ((ch & 0xF8) == 0xF0) {
-        return 4;
-    }
-    return 1;
-}
-
-std::vector<std::string> SplitUtf8ByChars(const std::string& text, size_t max_chars) {
-    std::vector<std::string> chunks;
-    if (max_chars == 0 || text.empty()) {
-        return chunks;
-    }
-    size_t offset = 0;
-    while (offset < text.size()) {
-        size_t count = 0;
-        size_t start = offset;
-        while (offset < text.size() && count < max_chars) {
-            size_t len = Utf8CharLen(static_cast<unsigned char>(text[offset]));
-            if (offset + len > text.size()) {
-                break;
-            }
-            offset += len;
-            count++;
-        }
-        if (offset == start) {
-            break;
-        }
-        chunks.push_back(text.substr(start, offset - start));
-    }
-    return chunks;
-}
 
 std::string EscapeJsonString(const std::string& input) {
     std::string out;
@@ -157,7 +115,6 @@ void TextInvokeTool::Initialize() {
             Property("text", kPropertyTypeString),
             Property("priority", kPropertyTypeInteger, 0),
             Property("timestamp_ms", kPropertyTypeInteger, 0),
-            Property("max_len", kPropertyTypeInteger, 0),
             Property("queue_limit", kPropertyTypeInteger, 0),
             Property("drop_oldest", kPropertyTypeBoolean, true),
         }),
@@ -168,12 +125,6 @@ void TextInvokeTool::Initialize() {
             options.has_priority = options.priority != 0;
             options.timestamp_ms = static_cast<uint64_t>(properties["timestamp_ms"].value<int>());
             options.has_timestamp = options.timestamp_ms != 0;
-            int max_len = properties["max_len"].value<int>();
-            if (max_len < 0) {
-                max_len = 0;
-            }
-            options.max_len = static_cast<size_t>(max_len);
-            options.has_max_len = options.max_len > 0;
             int queue_limit = properties["queue_limit"].value<int>();
             if (queue_limit < 0) {
                 queue_limit = 0;
@@ -214,39 +165,14 @@ void TextInvokeTool::Submit(const std::string& text, const Options& options) {
     ESP_LOGI(TAG, "Submit text len=%u", static_cast<unsigned>(text.size()));
 
     bool enqueued_any = false;
-    if (options.has_max_len && options.max_len > 0) {
-        auto chunks = SplitUtf8ByChars(text, options.max_len);
-        if (!chunks.empty()) {
-            for (const auto& chunk : chunks) {
-                QueueItem item{
-                    .text = chunk,
-                    .priority = options.priority,
-                    .timestamp_ms = options.timestamp_ms,
-                    .has_priority = options.has_priority,
-                    .has_timestamp = options.has_timestamp,
-                };
-                enqueued_any |= EnqueueItem(item);
-            }
-        } else {
-            QueueItem item{
-                .text = text,
-                .priority = options.priority,
-                .timestamp_ms = options.timestamp_ms,
-                .has_priority = options.has_priority,
-                .has_timestamp = options.has_timestamp,
-            };
-            enqueued_any |= EnqueueItem(item);
-        }
-    } else {
-        QueueItem item{
-            .text = text,
-            .priority = options.priority,
-            .timestamp_ms = options.timestamp_ms,
-            .has_priority = options.has_priority,
-            .has_timestamp = options.has_timestamp,
-        };
-        enqueued_any |= EnqueueItem(item);
-    }
+    QueueItem item{
+        .text = text,
+        .priority = options.priority,
+        .timestamp_ms = options.timestamp_ms,
+        .has_priority = options.has_priority,
+        .has_timestamp = options.has_timestamp,
+    };
+    enqueued_any |= EnqueueItem(item);
 
     if (!enqueued_any) {
         ESP_LOGW(TAG, "Submit dropped: queue policy rejected all items");

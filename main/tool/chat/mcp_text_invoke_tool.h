@@ -18,8 +18,6 @@ public:
         bool has_priority = false;
         uint64_t timestamp_ms = 0;
         bool has_timestamp = false;
-        size_t max_len = 0;
-        bool has_max_len = false;
         size_t queue_limit = 0;
         bool has_queue_limit = false;
         bool drop_oldest = true;

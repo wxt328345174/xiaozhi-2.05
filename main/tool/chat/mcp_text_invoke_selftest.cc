@@ -1,5 +1,7 @@
 #include "mcp_text_invoke_tool.h"
 
+#include <string>
+
 #include <esp_err.h>
 #include <esp_log.h>
 #include <esp_timer.h>
@@ -14,8 +16,14 @@ void OnSelftestTimer(void* arg) {
     (void)arg;
     ESP_LOGI(TAG, "Selftest trigger: submit two messages");
     TextInvokeTool::Options options;
-    TextInvokeTool::GetInstance().Submit("自检：TTS", options);
-    TextInvokeTool::GetInstance().Submit("自检：排队", options);
+    TextInvokeTool::GetInstance().Submit("自检：TTS 短消息验证立即播报", options);
+
+    std::string long_text =
+        "自检：长消息验证无长度限制和排队。"
+        "这是用于测试的长文本，没有实际业务含义，只是为了占用大约 600+ 字符的空间，"
+        "如果你听到这一段说明长消息已经正常通过 wake word 通道并触发了 TTS。";
+
+    TextInvokeTool::GetInstance().Submit(long_text, options);
 }
 
 } // namespace
