@@ -13,7 +13,6 @@ namespace {
 
 static const char* TAG = "AlarmTool";
 static const size_t kMaxAlarms = 16;
-static const size_t kTextMaxChars = 10;
 static const char* kTemplatePrefix = "【闹钟助手】该";
 static const char* kTemplateSuffix = "了";
 
@@ -33,23 +32,6 @@ size_t Utf8CharLen(unsigned char ch) {
     return 1;
 }
 
-std::string TruncateUtf8(const std::string& text, size_t max_chars) {
-    if (max_chars == 0 || text.empty()) {
-        return "";
-    }
-    size_t count = 0;
-    size_t offset = 0;
-    while (offset < text.size() && count < max_chars) {
-        size_t len = Utf8CharLen(static_cast<unsigned char>(text[offset]));
-        if (offset + len > text.size()) {
-            break;
-        }
-        offset += len;
-        count++;
-    }
-    return text.substr(0, offset);
-}
-
 size_t CountUtf8Chars(const std::string& text) {
     size_t count = 0;
     size_t offset = 0;
@@ -64,23 +46,14 @@ size_t CountUtf8Chars(const std::string& text) {
     return count;
 }
 
-// Fixed template to avoid being treated as a new task by LLM: "到点:" + label, <=10 chars.
+// Fixed template to avoid being treated as a new task by LLM.
 std::string BuildReminderText(const std::string& label) {
     const std::string prefix = kTemplatePrefix;
     const std::string suffix = kTemplateSuffix;
-    size_t prefix_chars = CountUtf8Chars(prefix);
-    size_t suffix_chars = CountUtf8Chars(suffix);
-    size_t remaining = 0;
-    if (kTextMaxChars > prefix_chars + suffix_chars) {
-        remaining = kTextMaxChars - prefix_chars - suffix_chars;
-    }
-    std::string trimmed_label = TruncateUtf8(label, remaining);
-
-    // If no label or label gets truncated to empty, fall back to固定文案以避免命令语气
-    if (trimmed_label.empty()) {
+    if (label.empty()) {
         return "【闹钟助手】到点了";
     }
-    return prefix + trimmed_label + suffix;
+    return prefix + label + suffix;
 }
 
 std::string RepeatTypeString(bool is_daily) {
