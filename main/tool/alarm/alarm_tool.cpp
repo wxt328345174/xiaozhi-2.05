@@ -13,8 +13,12 @@ namespace {
 
 static const char* TAG = "AlarmTool";
 static const size_t kMaxAlarms = 16;
-static const char* kTemplatePrefix = "【闹钟助手】该";
-static const char* kTemplateSuffix = "了";
+
+enum class ReminderType {
+    kAlarmOneTime,
+    kAlarmDaily,
+    kCountdown
+};
 
 size_t Utf8CharLen(unsigned char ch) {
     if ((ch & 0x80) == 0x00) {
@@ -46,14 +50,66 @@ size_t CountUtf8Chars(const std::string& text) {
     return count;
 }
 
-// Fixed template to avoid being treated as a new task by LLM.
-std::string BuildReminderText(const std::string& label) {
-    const std::string prefix = kTemplatePrefix;
-    const std::string suffix = kTemplateSuffix;
-    if (label.empty()) {
-        return "【闹钟助手】到点了";
+std::string TruncateUtf8(const std::string& text, size_t max_chars) {
+    size_t count = 0;
+    size_t offset = 0;
+    while (offset < text.size() && count < max_chars) {
+        size_t len = Utf8CharLen(static_cast<unsigned char>(text[offset]));
+        if (offset + len > text.size()) {
+            break;
+        }
+        offset += len;
+        count++;
     }
-    return prefix + label + suffix;
+    return text.substr(0, offset);
+}
+
+const char* ReminderTypeName(ReminderType type) {
+    switch (type) {
+    case ReminderType::kAlarmOneTime:
+        return "ALARM_ONCE";
+    case ReminderType::kAlarmDaily:
+        return "ALARM_DAILY";
+    case ReminderType::kCountdown:
+        return "COUNTDOWN";
+    default:
+        return "UNKNOWN";
+    }
+}
+
+std::string BuildReminderSentence(const std::string& prefix,
+                                  const std::string& body,
+                                  const std::string& label,
+                                  const std::optional<int64_t>& trigger_ms) {
+    std::string text = prefix + body;
+    if (!label.empty()) {
+        text += "：";
+        text += label;
+    }
+    if (trigger_ms.has_value()) {
+        std::string formatted = TimeParser::FormatLocalTime(trigger_ms.value());
+        if (!formatted.empty()) {
+            text += "（";
+            text += formatted;
+            text += "）";
+        }
+    }
+    text += "。提醒已送达，播报完毕。";
+    return text;
+}
+
+std::string BuildReminderPhrase(ReminderType type,
+                                const std::string& label,
+                                std::optional<int64_t> trigger_ms) {
+    switch (type) {
+    case ReminderType::kCountdown:
+        return BuildReminderSentence("【计时助手播报】", "倒计时结束", label, trigger_ms);
+    case ReminderType::kAlarmDaily:
+        return BuildReminderSentence("【每日提醒播报】", "现在提醒", label, trigger_ms);
+    case ReminderType::kAlarmOneTime:
+    default:
+        return BuildReminderSentence("【闹钟助手播报】", "时间到", label, trigger_ms);
+    }
 }
 
 std::string RepeatTypeString(bool is_daily) {
@@ -366,7 +422,8 @@ ReturnValue AlarmTool::HandleSetAlarm(const PropertyList& properties) {
     SaveAlarms(snapshot);
     ScheduleNext();
 
-    std::string preview_text = BuildReminderText(record.label);
+    ReminderType preview_type = record.is_daily ? ReminderType::kAlarmDaily : ReminderType::kAlarmOneTime;
+    std::string preview_text = BuildReminderPhrase(preview_type, record.label, std::optional<int64_t>(record.trigger_ms));
     ESP_LOGI(TAG, "Alarm preview text: %s", preview_text.c_str());
 
     cJSON* root = cJSON_CreateObject();
@@ -504,7 +561,7 @@ ReturnValue AlarmTool::HandleSetCountdown(const PropertyList& properties) {
 
     ScheduleNext();
 
-    std::string preview_text = BuildReminderText(item.label);
+    std::string preview_text = BuildReminderPhrase(ReminderType::kCountdown, item.label, std::optional<int64_t>(item.deadline_ms));
     ESP_LOGI(TAG, "Countdown preview text: %s", preview_text.c_str());
 
     cJSON* root = cJSON_CreateObject();
@@ -665,24 +722,31 @@ void AlarmTool::ScheduleNext() {
 }
 
 void AlarmTool::TriggerAlarm(const AlarmRecord& alarm) {
-    std::string text = BuildReminderText(alarm.label);
-    size_t chars = CountUtf8Chars(text);
+    ReminderType type = alarm.is_daily ? ReminderType::kAlarmDaily : ReminderType::kAlarmOneTime;
+    std::string text = BuildReminderPhrase(type, alarm.label, std::optional<int64_t>(alarm.trigger_ms));
+    unsigned chars = static_cast<unsigned>(CountUtf8Chars(text));
+    std::string preview = TruncateUtf8(text, 80);
     TextInvokeTool::GetInstance().Submit(text);
-    ESP_LOGI(TAG, "Alarm triggered: id=%u repeat=%s text=%s chars=%zu",
+    ESP_LOGI(TAG, "Alarm triggered: id=%u repeat=%s type=%s label='%s' text_chars=%u preview='%s'",
         static_cast<unsigned>(alarm.id),
         RepeatTypeString(alarm.is_daily).c_str(),
-        text.c_str(),
-        chars);
+        ReminderTypeName(type),
+        alarm.label.c_str(),
+        chars,
+        preview.c_str());
 }
 
 void AlarmTool::TriggerCountdown(const CountdownItem& countdown) {
-    std::string text = BuildReminderText(countdown.label);
-    size_t chars = CountUtf8Chars(text);
+    std::string text = BuildReminderPhrase(ReminderType::kCountdown, countdown.label, std::optional<int64_t>(countdown.deadline_ms));
+    unsigned chars = static_cast<unsigned>(CountUtf8Chars(text));
+    std::string preview = TruncateUtf8(text, 80);
     TextInvokeTool::GetInstance().Submit(text);
-    ESP_LOGI(TAG, "Countdown triggered: id=%u text=%s chars=%zu",
+    ESP_LOGI(TAG, "Countdown triggered: id=%u type=%s label='%s' text_chars=%u preview='%s'",
         static_cast<unsigned>(countdown.id),
-        text.c_str(),
-        chars);
+        ReminderTypeName(ReminderType::kCountdown),
+        countdown.label.c_str(),
+        chars,
+        preview.c_str());
 }
 
 void AlarmTool::SaveAlarms(const std::map<uint32_t, AlarmRecord>& snapshot) {
