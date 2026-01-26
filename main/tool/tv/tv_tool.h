@@ -7,6 +7,8 @@
 
 #include <esp_timer.h>
 
+#include "device_state.h"
+
 #include "mcp_server.h"
 
 class TvTool {
@@ -26,15 +28,24 @@ private:
     ReturnValue HandleStatus(const PropertyList& properties);
 
     void OnTimer();
+    void OnDeviceStateChanged(DeviceState previous_state, DeviceState current_state);
     void CreateTimerIfNeeded();
     void StopTimer();
     uint64_t GetNowMs() const;
+
+    enum class TvState {
+        kIdle,
+        kArmed,
+        kWaitSpeaking,
+        kWaitListening,
+    };
 
     std::mutex mutex_;
     esp_timer_handle_t timer_ = nullptr;
     bool running_ = false;
     bool initialized_ = false;
     uint64_t last_trigger_ms_ = 0;
+    TvState state_ = TvState::kIdle;
 };
 
 #endif // TV_TOOL_H

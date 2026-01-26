@@ -7,12 +7,13 @@
 #include <esp_log.h>
 
 #include "tool/chat/mcp_text_invoke_tool.h"
+#include "device_state_event.h"
 
 namespace {
 
 static const char* TAG = "TvTool";
-static const uint64_t kIntervalUs = 30ULL * 1000000ULL;
-static const char* kInvokeText = "[电视画面播报助手] 立刻调用 MCP 工具self.camera.take_photo，并在 question 中写：请用中文解说当前电视画面；若不是电视画面请提示用户把镜头对准屏幕。";
+static const uint64_t kIntervalUs = 15ULL * 1000000ULL;
+static const char* kInvokeText = "[电视画面播报助手] Take a photo and explain it，并在 question 中写：请用中文解说当前电视画面；若不是电视画面请提示用户把镜头对准屏幕。";
 
 }
 
@@ -30,6 +31,11 @@ void TvTool::Initialize(McpServer* server) {
         return;
     }
     initialized_ = true;
+
+    auto& state_manager = DeviceStateEventManager::GetInstance();
+    state_manager.RegisterStateChangeCallback([this](DeviceState previous_state, DeviceState current_state) {
+        OnDeviceStateChanged(previous_state, current_state);
+    });
 
     server->AddTool("tv.start",
         "Enter TV scene and start periodic photo narration prompts.",
@@ -55,7 +61,7 @@ void TvTool::Initialize(McpServer* server) {
 
 ReturnValue TvTool::HandleStart(const PropertyList& properties) {
     (void)properties;
-    bool trigger_now = false;
+    bool arm_timer = false;
     {
         std::lock_guard<std::mutex> lock(mutex_);
         if (running_) {
@@ -72,18 +78,19 @@ ReturnValue TvTool::HandleStart(const PropertyList& properties) {
             return std::string("{\"ok\":false,\"running\":false,\"message\":\"timer_create_failed\"}");
         }
 
-        esp_err_t err = esp_timer_start_periodic(timer_, kIntervalUs);
+        esp_err_t err = esp_timer_start_once(timer_, kIntervalUs);
         if (err != ESP_OK) {
             ESP_LOGE(TAG, "Failed to start tv timer: %s", esp_err_to_name(err));
             return std::string("{\"ok\":false,\"running\":false,\"message\":\"timer_start_failed\"}");
         }
 
         running_ = true;
-        trigger_now = true;
+        state_ = TvState::kArmed;
+        arm_timer = true;
     }
 
-    if (trigger_now) {
-        OnTimer();
+    if (arm_timer) {
+        ESP_LOGI(TAG, "TV timer armed (%u sec)", static_cast<unsigned>(kIntervalUs / 1000000ULL));
     }
 
     char buffer[160] = {0};
@@ -107,6 +114,7 @@ ReturnValue TvTool::HandleStop(const PropertyList& properties) {
     }
 
     running_ = false;
+    state_ = TvState::kIdle;
     StopTimer();
 
     char buffer[160] = {0};
@@ -131,11 +139,43 @@ ReturnValue TvTool::HandleStatus(const PropertyList& properties) {
 
 void TvTool::OnTimer() {
     std::lock_guard<std::mutex> lock(mutex_);
-    if (!running_) {
+    if (!running_ || state_ != TvState::kArmed) {
         return;
     }
     last_trigger_ms_ = GetNowMs();
+    state_ = TvState::kWaitSpeaking;
+    ESP_LOGI(TAG, "TV timer fired, submit trigger");
     TextInvokeTool::GetInstance().Submit(kInvokeText);
+}
+
+void TvTool::OnDeviceStateChanged(DeviceState previous_state, DeviceState current_state) {
+    (void)previous_state;
+    bool need_rearm = false;
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (!running_) {
+            return;
+        }
+        if (state_ == TvState::kWaitSpeaking && current_state == kDeviceStateSpeaking) {
+            state_ = TvState::kWaitListening;
+            ESP_LOGI(TAG, "TV state: WAIT_SPEAKING -> WAIT_LISTENING");
+        } else if (state_ == TvState::kWaitListening && current_state == kDeviceStateListening) {
+            state_ = TvState::kArmed;
+            need_rearm = true;
+        }
+    }
+
+    if (need_rearm) {
+        CreateTimerIfNeeded();
+        if (timer_ != nullptr) {
+            esp_err_t err = esp_timer_start_once(timer_, kIntervalUs);
+            if (err != ESP_OK) {
+                ESP_LOGE(TAG, "Failed to rearm tv timer: %s", esp_err_to_name(err));
+            } else {
+                ESP_LOGI(TAG, "TV timer re-armed (%u sec)", static_cast<unsigned>(kIntervalUs / 1000000ULL));
+            }
+        }
+    }
 }
 
 void TvTool::CreateTimerIfNeeded() {
