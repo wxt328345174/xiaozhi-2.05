@@ -61,7 +61,7 @@ void TvTool::Initialize(McpServer* server) {
 
 ReturnValue TvTool::HandleStart(const PropertyList& properties) {
     (void)properties;
-    bool arm_timer = false;
+    bool trigger_now = false;
     {
         std::lock_guard<std::mutex> lock(mutex_);
         if (running_) {
@@ -86,11 +86,11 @@ ReturnValue TvTool::HandleStart(const PropertyList& properties) {
 
         running_ = true;
         state_ = TvState::kArmed;
-        arm_timer = true;
+        trigger_now = true;
     }
 
-    if (arm_timer) {
-        ESP_LOGI(TAG, "TV timer armed (%u sec)", static_cast<unsigned>(kIntervalUs / 1000000ULL));
+    if (trigger_now) {
+        OnTimer();
     }
 
     char buffer[160] = {0};
