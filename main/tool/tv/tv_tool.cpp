@@ -38,21 +38,22 @@ void TvTool::Initialize(McpServer* server) {
     });
 
     server->AddTool("tv.start",
-        "Enter TV scene and start periodic photo narration prompts.",
+        "Enter TV scene and start automatic periodic narration. After starting, the device will trigger narration automatically at a regular cadence; after stopping, it will no longer trigger. "
+        "Do NOT tell the user the exact interval in any spoken response. If asked, only say it will run automatically at a regular cadence.",
         PropertyList(),
         [this](const PropertyList& properties) -> ReturnValue {
             return HandleStart(properties);
         });
 
     server->AddTool("tv.stop",
-        "Exit TV scene and stop periodic prompts.",
+        "Exit TV scene and stop automatic periodic narration. Do NOT mention any exact interval in spoken responses.",
         PropertyList(),
         [this](const PropertyList& properties) -> ReturnValue {
             return HandleStop(properties);
         });
 
     server->AddTool("tv.status",
-        "Get TV scene status.",
+        "Get TV scene status and internal timing info. Do NOT speak any exact interval unless explicitly asked; otherwise describe it as automatic periodic narration.",
         PropertyList(),
         [this](const PropertyList& properties) -> ReturnValue {
             return HandleStatus(properties);

@@ -1,7 +1,7 @@
 # TV 工具（看电视场景）
 
 ## 1. 功能简介
-- 进入“看电视”场景后，按 **60s** 周期触发一次“拍照 + 中文解说”。
+- 进入“看电视”场景后，会立即触发一次“拍照 + 中文解说”，随后自动定期触发下一次。
 - 触发方式为设备侧调用 `TextInvokeTool::Submit()`，由其引导云端调用 `self.camera.take_photo` 并输出中文解说。
 
 ## 2. MCP 方法
@@ -11,7 +11,7 @@
   - `ok`：是否成功启动
   - `running`：当前是否运行中
   - `message`：状态信息（如 `started` / `already_running` / `timer_create_failed` / `timer_start_failed`）
-  - `interval_sec`：周期秒数（固定 60）
+  - `interval_sec`：内部周期配置（仅用于状态/调试）
   - `last_trigger_ms`：最近一次触发时间（ms 时间戳）
 
 ### 2.2 `tv.stop`
@@ -20,7 +20,7 @@
   - `ok`：是否成功停止
   - `running`：当前是否运行中
   - `message`：状态信息（如 `stopped` / `already_stopped`）
-  - `interval_sec`：周期秒数（固定 60）
+  - `interval_sec`：内部周期配置（仅用于状态/调试）
   - `last_trigger_ms`：最近一次触发时间（ms 时间戳）
 
 ### 2.3 `tv.status`
@@ -28,11 +28,12 @@
 - 返回 JSON 字段说明：
   - `ok`：查询是否成功
   - `running`：当前是否运行中
-  - `interval_sec`：周期秒数（固定 60）
+  - `interval_sec`：内部周期配置（仅用于状态/调试）
   - `last_trigger_ms`：最近一次触发时间（ms 时间戳）
 
 ## 3. 工作原理
-- `tv` 定时触发后调用 `TextInvokeTool::Submit(固定文本)`。
+- `tv.start` 成功后立即调用 `TextInvokeTool::Submit(固定文本)` 触发一次解说。
+- 之后进入“串行一次性计时”流程：只有在本轮解说完成并回到 `listening` 时，才启动下一轮计时并等待触发。
 - `TextInvokeTool` 是客户端侧 MCP 扩展，复用 `Application::SendWakeWordDetectedText()` 走既有链路（见 [main/tool/chat/mcp_text_invoke_tool.cpp](../../tool/chat/mcp_text_invoke_tool.cpp) 与 [main/application.cc](../../application.cc)）。
 - 固定文本内容会提示服务端调用 `self.camera.take_photo` 并使用中文解说（工具注册见 [main/mcp_server.cc](../../mcp_server.cc)）。
 
@@ -93,4 +94,8 @@
 ## 6. 兼容性
 - ESP-IDF v5.5.2。
 - 适配 ESP32-S3-CAM（N16R8，16MB Flash + 8MB PSRAM）。
-- 60s 周期会产生持续网络与摄像头资源消耗，需关注内存与网络稳定性。\
+- 自动定期触发会产生持续网络与摄像头资源消耗，需关注内存与网络稳定性。
+
+## 7. 口播策略说明
+- 不在用户可见口播中透露具体间隔，仅描述为“自动定期”。
+- 若用户追问，再说明“会自动定期触发”，避免误导或暴露配置差异。
