@@ -21,6 +21,10 @@
 #include "esp_lcd_ili9341.h"
 #endif
 
+#if defined(LCD_TYPE_GC9D01_SERIAL)
+#include "esp_lcd_gc9d01n.h"
+#endif
+
 #if defined(LCD_TYPE_GC9A01_SERIAL)
 #include "esp_lcd_gc9a01.h"
 static const gc9a01_lcd_init_cmd_t gc9107_lcd_init_cmds[] = {
@@ -100,6 +104,8 @@ private:
         panel_config.bits_per_pixel = 16;
 #if defined(LCD_TYPE_ILI9341_SERIAL)
         ESP_ERROR_CHECK(esp_lcd_new_panel_ili9341(panel_io, &panel_config, &panel));
+#elif defined(LCD_TYPE_GC9D01_SERIAL)
+    ESP_ERROR_CHECK(esp_lcd_new_panel_gc9d01n(panel_io, &panel_config, &panel));
 #elif defined(LCD_TYPE_GC9A01_SERIAL)
         ESP_ERROR_CHECK(esp_lcd_new_panel_gc9a01(panel_io, &panel_config, &panel));
         gc9a01_vendor_config_t gc9107_vendor_config = {

@@ -22,6 +22,10 @@
 #include "esp_lcd_ili9341.h"
 #endif
 
+#if defined(LCD_TYPE_GC9D01_SERIAL)
+#include "esp_lcd_gc9d01n.h"
+#endif
+
 #if defined(LCD_TYPE_GC9A01_SERIAL)
 #include "esp_lcd_gc9a01.h"
 static const gc9a01_lcd_init_cmd_t gc9107_lcd_init_cmds[] = {
@@ -108,6 +112,8 @@ private:
             .init_cmds = gc9107_lcd_init_cmds,
             .init_cmds_size = sizeof(gc9107_lcd_init_cmds) / sizeof(gc9a01_lcd_init_cmd_t),
         };        
+#elif defined(LCD_TYPE_GC9D01_SERIAL)
+        ESP_ERROR_CHECK(esp_lcd_new_panel_gc9d01n(panel_io, &panel_config, &panel));
 #else
         ESP_ERROR_CHECK(esp_lcd_new_panel_st7789(panel_io, &panel_config, &panel));
 #endif
