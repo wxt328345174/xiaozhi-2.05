@@ -11,7 +11,7 @@
 namespace {
 
 static const char* TAG = "TvTool";
-static const uint64_t kIntervalUs = 60ULL * 1000000ULL;
+static const uint64_t kIntervalUs = 30ULL * 1000000ULL;
 static const char* kInvokeText = "[电视画面播报助手] 立刻调用 MCP 工具self.camera.take_photo，并在 question 中写：请用中文解说当前电视画面；若不是电视画面请提示用户把镜头对准屏幕。";
 
 }
@@ -55,30 +55,36 @@ void TvTool::Initialize(McpServer* server) {
 
 ReturnValue TvTool::HandleStart(const PropertyList& properties) {
     (void)properties;
-    std::lock_guard<std::mutex> lock(mutex_);
-    if (running_) {
-        char buffer[128] = {0};
-        std::snprintf(buffer, sizeof(buffer),
-            "{\"ok\":false,\"running\":true,\"message\":\"already_running\",\"interval_sec\":%u,\"last_trigger_ms\":%llu}",
-            static_cast<unsigned>(kIntervalUs / 1000000ULL),
-            static_cast<unsigned long long>(last_trigger_ms_));
-        return std::string(buffer);
+    bool trigger_now = false;
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (running_) {
+            char buffer[128] = {0};
+            std::snprintf(buffer, sizeof(buffer),
+                "{\"ok\":false,\"running\":true,\"message\":\"already_running\",\"interval_sec\":%u,\"last_trigger_ms\":%llu}",
+                static_cast<unsigned>(kIntervalUs / 1000000ULL),
+                static_cast<unsigned long long>(last_trigger_ms_));
+            return std::string(buffer);
+        }
+
+        CreateTimerIfNeeded();
+        if (timer_ == nullptr) {
+            return std::string("{\"ok\":false,\"running\":false,\"message\":\"timer_create_failed\"}");
+        }
+
+        esp_err_t err = esp_timer_start_periodic(timer_, kIntervalUs);
+        if (err != ESP_OK) {
+            ESP_LOGE(TAG, "Failed to start tv timer: %s", esp_err_to_name(err));
+            return std::string("{\"ok\":false,\"running\":false,\"message\":\"timer_start_failed\"}");
+        }
+
+        running_ = true;
+        trigger_now = true;
     }
 
-    CreateTimerIfNeeded();
-    if (timer_ == nullptr) {
-        return std::string("{\"ok\":false,\"running\":false,\"message\":\"timer_create_failed\"}");
+    if (trigger_now) {
+        OnTimer();
     }
-
-    esp_err_t err = esp_timer_start_periodic(timer_, kIntervalUs);
-    if (err != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to start tv timer: %s", esp_err_to_name(err));
-        return std::string("{\"ok\":false,\"running\":false,\"message\":\"timer_start_failed\"}");
-    }
-
-    running_ = true;
-
-    OnTimer();
 
     char buffer[160] = {0};
     std::snprintf(buffer, sizeof(buffer),
@@ -100,8 +106,8 @@ ReturnValue TvTool::HandleStop(const PropertyList& properties) {
         return std::string(buffer);
     }
 
-    StopTimer();
     running_ = false;
+    StopTimer();
 
     char buffer[160] = {0};
     std::snprintf(buffer, sizeof(buffer),
@@ -124,6 +130,10 @@ ReturnValue TvTool::HandleStatus(const PropertyList& properties) {
 }
 
 void TvTool::OnTimer() {
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (!running_) {
+        return;
+    }
     last_trigger_ms_ = GetNowMs();
     TextInvokeTool::GetInstance().Submit(kInvokeText);
 }
