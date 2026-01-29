@@ -3,7 +3,6 @@
 注意因为摄像头占用IO较多，所以占用了ESP32S3的USB 19 20两个引脚
 连线方式参考config.h文件中对引脚的定义
 
- 
 # 编译配置命令
 
 **配置编译目标为 ESP32S3：**
@@ -31,6 +30,7 @@ Xiaozhi Assistant -> Board Type ->面包板新版接线（WiFi）+ LCD + Camera
 在 menuconfig 中按以下步骤启用对应型号的支持：
 
 1. **导航到传感器配置：**
+
    ```
    (Top) → Component config → Espressif Camera Sensors Configurations → Camera Sensor Configuration → Select and Set Camera Sensor
    ```
@@ -43,6 +43,23 @@ Xiaozhi Assistant -> Board Type ->面包板新版接线（WiFi）+ LCD + Camera
    - 启用 **Auto detect**
    - 推荐将 **default output format** 调整为 **YUV422** 及合适的分辨率大小
    - （目前支持 YUV422、RGB565，YUV422 更节省内存空间）
+
+**MCP 工具支持：**
+
+本板级支持 MCP (Model Context Protocol) 工具，包括：
+
+- **LampController**: 用于控制灯光（默认 GPIO 14）。
+- **MotionTool**: 用于控制双路直流电机（如 DRV8833 驱动）。
+
+**关于 Motion Tool 引脚配置的特别说明：**
+由于摄像头模组占用了大量 GPIO（包括原 LCD 板用于电机的 GPIO 10-13），Motion Tool 的默认电机控制引脚在 `config.h` 中被设置为 `GPIO_NUM_NC`（未连接），以防止硬件冲突。
+
+如果您需要使用电机控制功能，请执行以下操作：
+
+1. 打开 `main/boards/bread-compact-wifi-s3cam/config.h`。
+2. 找到 `Motion Tool Pin Definitions` 部分。
+3. 将 `MOTION_MOTOR_LEFT_IN1_PIN` 等宏定义修改为您实际连接的、未被摄像头占用的空闲 GPIO 引脚。
+4. 重新编译并烧录。
 
 **编译烧入：**
 

@@ -306,3 +306,12 @@
 #define LAMP_GPIO GPIO_NUM_14
 
 #endif // _BOARD_CONFIG_H_
+
+// Motion Tool Pin Definitions
+// DRV8833 Motor Driver
+// Note: Pins 10-13 used in LCD board are occupied by Camera in S3Cam.
+// Set to NC (Not Connected) for now. Please configure with actual hardware pins.
+#define MOTION_MOTOR_LEFT_IN1_PIN  GPIO_NUM_NC
+#define MOTION_MOTOR_LEFT_IN2_PIN  GPIO_NUM_NC
+#define MOTION_MOTOR_RIGHT_IN1_PIN GPIO_NUM_NC
+#define MOTION_MOTOR_RIGHT_IN2_PIN GPIO_NUM_NC

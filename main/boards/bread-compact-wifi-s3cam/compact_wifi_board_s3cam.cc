@@ -9,6 +9,7 @@
 #include "lamp_controller.h"
 #include "led/single_led.h"
 #include "esp32_camera.h"
+#include "motion_tool.h"
 
 #include <wifi_station.h>
 #include <esp_log.h>
@@ -180,6 +181,13 @@ private:
         });
     }
 
+    // 物联网初始化，添加对 AI 可见设备
+    void InitializeTools() {
+        static LampController lamp(LAMP_GPIO);
+        static MotionTool motion(MOTION_MOTOR_LEFT_IN1_PIN, MOTION_MOTOR_LEFT_IN2_PIN, 
+                                 MOTION_MOTOR_RIGHT_IN1_PIN, MOTION_MOTOR_RIGHT_IN2_PIN);
+    }
+
 public:
     CompactWifiBoardS3Cam() :
         boot_button_(BOOT_BUTTON_GPIO) {
@@ -187,6 +195,7 @@ public:
         InitializeLcdDisplay();
         InitializeButtons();
         InitializeCamera();
+        InitializeTools();
         if (DISPLAY_BACKLIGHT_PIN != GPIO_NUM_NC) {
             GetBacklight()->RestoreBrightness();
         }
