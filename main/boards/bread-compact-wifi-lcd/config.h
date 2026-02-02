@@ -301,4 +301,11 @@
 // A MCP Test: Control a lamp
 #define LAMP_GPIO GPIO_NUM_18
 
+// Motion Tool Pin Definitions
+// DRV8833 Motor Driver
+#define MOTION_MOTOR_LEFT_IN1_PIN  GPIO_NUM_10
+#define MOTION_MOTOR_LEFT_IN2_PIN  GPIO_NUM_11
+#define MOTION_MOTOR_RIGHT_IN1_PIN GPIO_NUM_12
+#define MOTION_MOTOR_RIGHT_IN2_PIN GPIO_NUM_13
+
 #endif // _BOARD_CONFIG_H_
