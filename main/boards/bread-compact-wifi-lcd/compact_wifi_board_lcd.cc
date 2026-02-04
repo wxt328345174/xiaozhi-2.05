@@ -143,7 +143,9 @@ private:
     // 物联网初始化，添加对 AI 可见设备
     void InitializeTools() {
         static LampController lamp(LAMP_GPIO);
-        static MotionTool motion(MOTION_MOTOR_LEFT_IN1_PIN, MOTION_MOTOR_LEFT_IN2_PIN, 
+        static MotionTool motion(MOTION_MOTOR_LEFT_NSLEEP_PIN, 
+                                 MOTION_MOTOR_LEFT_IN1_PIN, MOTION_MOTOR_LEFT_IN2_PIN, 
+                                 MOTION_MOTOR_RIGHT_NSLEEP_PIN,
                                  MOTION_MOTOR_RIGHT_IN1_PIN, MOTION_MOTOR_RIGHT_IN2_PIN);
     }
 
@@ -161,6 +163,9 @@ public:
     }
 
     virtual Led* GetLed() override {
+        if (BUILTIN_LED_GPIO == GPIO_NUM_NC) {
+            return nullptr;
+        }
         static SingleLed led(BUILTIN_LED_GPIO);
         return &led;
     }

@@ -5,15 +5,38 @@
 
 #define TAG "MotorDriver"
 
-MotorDriver::MotorDriver(gpio_num_t left_in1, gpio_num_t left_in2, 
-                         gpio_num_t right_in1, gpio_num_t right_in2)
-    : left_in1_(left_in1), left_in2_(left_in2),
-      right_in1_(right_in1), right_in2_(right_in2) {
+MotorDriver::MotorDriver(gpio_num_t left_nsleep, gpio_num_t left_in1, gpio_num_t left_in2, 
+                         gpio_num_t right_nsleep, gpio_num_t right_in1, gpio_num_t right_in2)
+    : left_nsleep_(left_nsleep), left_in1_(left_in1), left_in2_(left_in2),
+      right_nsleep_(right_nsleep), right_in1_(right_in1), right_in2_(right_in2) {
     Initialize();
 }
 
 void MotorDriver::Initialize() {
-    ESP_LOGI(TAG, "Initializing Motor Driver");
+    ESP_LOGI(TAG, "Initializing Motor Driver (DRV8837 x2)");
+
+    // 初始化 nSLEEP 引脚为 GPIO 输出模式，并唤醒芯片
+    gpio_config_t io_conf = {
+        .pin_bit_mask = 0,
+        .mode = GPIO_MODE_OUTPUT,
+        .pull_up_en = GPIO_PULLUP_DISABLE,
+        .pull_down_en = GPIO_PULLDOWN_DISABLE,
+        .intr_type = GPIO_INTR_DISABLE
+    };
+    
+    if (left_nsleep_ != GPIO_NUM_NC && left_nsleep_ >= 0) {
+        io_conf.pin_bit_mask = (1ULL << left_nsleep_);
+        ESP_ERROR_CHECK(gpio_config(&io_conf));
+        gpio_set_level(left_nsleep_, 1);  // 唤醒左电机驱动
+        ESP_LOGI(TAG, "Left motor nSLEEP (GPIO%d) initialized and enabled", left_nsleep_);
+    }
+    
+    if (right_nsleep_ != GPIO_NUM_NC && right_nsleep_ >= 0) {
+        io_conf.pin_bit_mask = (1ULL << right_nsleep_);
+        ESP_ERROR_CHECK(gpio_config(&io_conf));
+        gpio_set_level(right_nsleep_, 1);  // 唤醒右电机驱动
+        ESP_LOGI(TAG, "Right motor nSLEEP (GPIO%d) initialized and enabled", right_nsleep_);
+    }
 
     ledc_timer_config_t ledc_timer = {
         .speed_mode       = LEDC_LOW_SPEED_MODE,
@@ -73,6 +96,26 @@ void MotorDriver::Initialize() {
         } else {
              ESP_LOGW(TAG, "Skipping LEDC channel %d config because GPIO is invalid (%d)", i, ledc_channel[i].gpio_num);
         }
+    }
+}
+
+void MotorDriver::Sleep() {
+    ESP_LOGI(TAG, "Entering sleep mode");
+    if (left_nsleep_ != GPIO_NUM_NC && left_nsleep_ >= 0) {
+        gpio_set_level(left_nsleep_, 0);
+    }
+    if (right_nsleep_ != GPIO_NUM_NC && right_nsleep_ >= 0) {
+        gpio_set_level(right_nsleep_, 0);
+    }
+}
+
+void MotorDriver::Wakeup() {
+    ESP_LOGI(TAG, "Waking up from sleep mode");
+    if (left_nsleep_ != GPIO_NUM_NC && left_nsleep_ >= 0) {
+        gpio_set_level(left_nsleep_, 1);
+    }
+    if (right_nsleep_ != GPIO_NUM_NC && right_nsleep_ >= 0) {
+        gpio_set_level(right_nsleep_, 1);
     }
 }
 

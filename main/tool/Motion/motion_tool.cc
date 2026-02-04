@@ -10,9 +10,9 @@ struct MotionCommand {
     int duration_ms;
 };
 
-MotionTool::MotionTool(gpio_num_t left_in1, gpio_num_t left_in2, 
-                       gpio_num_t right_in1, gpio_num_t right_in2)
-    : motor_driver_(left_in1, left_in2, right_in1, right_in2) {
+MotionTool::MotionTool(gpio_num_t left_nsleep, gpio_num_t left_in1, gpio_num_t left_in2, 
+                       gpio_num_t right_nsleep, gpio_num_t right_in1, gpio_num_t right_in2)
+    : motor_driver_(left_nsleep, left_in1, left_in2, right_nsleep, right_in1, right_in2) {
     
     auto& mcp_server = McpServer::GetInstance();
 

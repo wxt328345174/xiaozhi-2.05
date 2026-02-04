@@ -593,7 +593,7 @@ void Application::MainEventLoop() {
         if (bits & MAIN_EVENT_VAD_CHANGE) {
             if (device_state_ == kDeviceStateListening) {
                 auto led = Board::GetInstance().GetLed();
-                led->OnStateChanged();
+                if (led) led->OnStateChanged();
             }
         }
 
@@ -688,7 +688,7 @@ void Application::SetDeviceState(DeviceState state) {
     auto& board = Board::GetInstance();
     auto display = board.GetDisplay();
     auto led = board.GetLed();
-    led->OnStateChanged();
+    if (led) led->OnStateChanged();
     switch (state) {
         case kDeviceStateUnknown:
         case kDeviceStateIdle:

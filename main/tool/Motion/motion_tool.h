@@ -7,8 +7,9 @@
 
 class MotionTool {
 public:
-    MotionTool(gpio_num_t left_in1, gpio_num_t left_in2, 
-               gpio_num_t right_in1, gpio_num_t right_in2);
+    // DRV8837 x2: 每颗芯片需要 nSLEEP + IN1 + IN2
+    MotionTool(gpio_num_t left_nsleep, gpio_num_t left_in1, gpio_num_t left_in2, 
+               gpio_num_t right_nsleep, gpio_num_t right_in1, gpio_num_t right_in2);
 
 private:
     MotorDriver motor_driver_;
