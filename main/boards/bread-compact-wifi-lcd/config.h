@@ -312,4 +312,15 @@
 #define MOTION_MOTOR_RIGHT_IN1_PIN    GPIO_NUM_48
 #define MOTION_MOTOR_RIGHT_IN2_PIN    GPIO_NUM_47
 
+// IR Sensor (ITR8307 x6) Pin Definitions - 红外传感器引脚配置
+// 用于机器人防跌落检测
+// 前向传感器 (Front) - 检测前方地面
+#define IR_SENSOR_FRONT_RIGHT_PIN   GPIO_NUM_38
+#define IR_SENSOR_FRONT_MIDDLE_PIN  GPIO_NUM_39
+#define IR_SENSOR_FRONT_LEFT_PIN    GPIO_NUM_40
+// 边缘传感器 (Edge) - 检测底盘边缘
+#define IR_SENSOR_EDGE_LEFT_PIN     GPIO_NUM_8
+#define IR_SENSOR_EDGE_MIDDLE_PIN   GPIO_NUM_17
+#define IR_SENSOR_EDGE_RIGHT_PIN    GPIO_NUM_18
+
 #endif // _BOARD_CONFIG_H_

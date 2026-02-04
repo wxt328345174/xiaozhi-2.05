@@ -9,6 +9,8 @@
 #include "lamp_controller.h"
 #include "led/single_led.h"
 #include "motion_tool.h"
+#include "mcp_text_invoke_tool.h"
+#include "ir_sensor.h"
 
 #include <wifi_station.h>
 #include <esp_log.h>
@@ -147,6 +149,28 @@ private:
                                  MOTION_MOTOR_LEFT_IN1_PIN, MOTION_MOTOR_LEFT_IN2_PIN, 
                                  MOTION_MOTOR_RIGHT_NSLEEP_PIN,
                                  MOTION_MOTOR_RIGHT_IN1_PIN, MOTION_MOTOR_RIGHT_IN2_PIN);
+        
+        // 红外传感器初始化 (ITR8307 x6)
+        static const gpio_num_t ir_pins[6] = {
+            IR_SENSOR_FRONT_RIGHT_PIN,
+            IR_SENSOR_FRONT_MIDDLE_PIN,
+            IR_SENSOR_FRONT_LEFT_PIN,
+            IR_SENSOR_EDGE_LEFT_PIN,
+            IR_SENSOR_EDGE_MIDDLE_PIN,
+            IR_SENSOR_EDGE_RIGHT_PIN
+        };
+        static IrSensorManager ir_sensors(ir_pins);
+        
+        // 红外传感器状态监控任务（每 500ms 打印一次状态）
+        xTaskCreate([](void* arg) {
+            IrSensorManager* sensors = (IrSensorManager*)arg;
+            vTaskDelay(pdMS_TO_TICKS(5000));  // 启动延迟 5 秒
+            ESP_LOGI("IrMonitor", "IR Sensor monitoring started");
+            while (true) {
+                sensors->PrintStatus();
+                vTaskDelay(pdMS_TO_TICKS(500));
+            }
+        }, "ir_monitor", 2048, &ir_sensors, 1, NULL);
     }
 
 public:
