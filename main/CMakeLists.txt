@@ -45,6 +45,7 @@ set(SOURCES "audio/audio_codec.cc"
             "tool/Motion/motor_driver.cc"
             "tool/Motion/motion_tool.cc"
             "tool/hw/ir_sensor.cc"
+            "tool/hw/anti_drop_controller.cc"
             )
 
 set(INCLUDE_DIRS "." "display" "display/lvgl_display" "display/lvgl_display/jpg" "audio" "protocols" "tool/Motion" "tool/chat" "tool/hw")

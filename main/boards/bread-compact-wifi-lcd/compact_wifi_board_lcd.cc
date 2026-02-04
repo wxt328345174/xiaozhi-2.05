@@ -11,6 +11,7 @@
 #include "motion_tool.h"
 #include "mcp_text_invoke_tool.h"
 #include "ir_sensor.h"
+#include "anti_drop_controller.h"
 
 #include <wifi_station.h>
 #include <esp_log.h>
@@ -161,16 +162,9 @@ private:
         };
         static IrSensorManager ir_sensors(ir_pins);
         
-        // 红外传感器状态监控任务（每 500ms 打印一次状态）
-        xTaskCreate([](void* arg) {
-            IrSensorManager* sensors = (IrSensorManager*)arg;
-            vTaskDelay(pdMS_TO_TICKS(5000));  // 启动延迟 5 秒
-            ESP_LOGI("IrMonitor", "IR Sensor monitoring started");
-            while (true) {
-                sensors->PrintStatus();
-                vTaskDelay(pdMS_TO_TICKS(500));
-            }
-        }, "ir_monitor", 2048, &ir_sensors, 1, NULL);
+        // 防掉落控制器（将红外传感器与电机驱动结合）
+        static AntiDropController anti_drop(&ir_sensors, motion.GetMotorDriver());
+        anti_drop.Start();  // 启动防掉落监控
     }
 
 public:
