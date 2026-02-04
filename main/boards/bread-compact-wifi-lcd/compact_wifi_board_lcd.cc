@@ -9,6 +9,7 @@
 #include "lamp_controller.h"
 #include "led/single_led.h"
 #include "motion_tool.h"
+#include "mcp_text_invoke_tool.h"
 
 #include <wifi_station.h>
 #include <esp_log.h>
@@ -147,6 +148,23 @@ private:
                                  MOTION_MOTOR_LEFT_IN1_PIN, MOTION_MOTOR_LEFT_IN2_PIN, 
                                  MOTION_MOTOR_RIGHT_NSLEEP_PIN,
                                  MOTION_MOTOR_RIGHT_IN1_PIN, MOTION_MOTOR_RIGHT_IN2_PIN);
+        
+        // 电机 MCP 自动测试任务（启动 15 秒后触发）
+        xTaskCreate([](void* arg) {
+            ESP_LOGI("MotorTest", "Motor test task started, waiting 15 seconds...");
+            vTaskDelay(pdMS_TO_TICKS(20000));  // 等待系统完全启动
+            
+            ESP_LOGI("MotorTest", "Sending wake word: 你好小智");
+            TextInvokeTool::GetInstance().Submit("你好小智");
+            
+            vTaskDelay(pdMS_TO_TICKS(3000));  // 等待唤醒完成
+            
+            ESP_LOGI("MotorTest", "Sending command: 全速前进");
+            TextInvokeTool::GetInstance().Submit("全速前进");
+            
+            ESP_LOGI("MotorTest", "Motor test commands sent.");
+            vTaskDelete(NULL);
+        }, "motor_test", 4096, NULL, 1, NULL);
     }
 
 public:
