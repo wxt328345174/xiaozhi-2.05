@@ -56,6 +56,9 @@ public:
     
     // Set whether to hide chat messages/subtitles
     void SetHideSubtitle(bool hide);
+
+protected:
+    void SetupEyesOnlyUI();
 };
 
 // SPI LCD display

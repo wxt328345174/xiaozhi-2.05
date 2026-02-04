@@ -14,6 +14,9 @@
 #include <cstring>
 
 #include "board.h"
+#if CONFIG_BOARD_TYPE_BREAD_COMPACT_WIFI_LCD
+#include "eyes_img.h"
+#endif
 
 #define TAG "LcdDisplay"
 
@@ -355,8 +358,54 @@ void LcdDisplay::Unlock() {
     lvgl_port_unlock();
 }
 
+void LcdDisplay::SetupEyesOnlyUI() {
+    DisplayLockGuard lock(this);
+
+    lv_obj_t* screen = lv_screen_active();
+    lv_obj_clean(screen);
+
+    // Clear legacy UI pointers to avoid double-free in destructor.
+    network_label_ = nullptr;
+    status_label_ = nullptr;
+    notification_label_ = nullptr;
+    mute_label_ = nullptr;
+    battery_label_ = nullptr;
+    top_bar_ = nullptr;
+    status_bar_ = nullptr;
+    content_ = nullptr;
+    container_ = nullptr;
+    side_bar_ = nullptr;
+    bottom_bar_ = nullptr;
+    preview_image_ = nullptr;
+    emoji_label_ = nullptr;
+    emoji_image_ = nullptr;
+    emoji_box_ = nullptr;
+    chat_message_label_ = nullptr;
+    low_battery_popup_ = nullptr;
+    low_battery_label_ = nullptr;
+    gif_controller_.reset();
+    preview_image_cached_.reset();
+
+    lv_obj_t* img = lv_image_create(screen);
+    lv_image_set_src(img, &eyes_img);
+
+    if (eyes_img.header.w != width_ || eyes_img.header.h != height_) {
+        // Strategy: keep aspect ratio, scale to fit screen, center with letterbox.
+        int32_t scale_w = (width_ * 256) / eyes_img.header.w;
+        int32_t scale_h = (height_ * 256) / eyes_img.header.h;
+        int32_t scale = (scale_w < scale_h) ? scale_w : scale_h;
+        lv_image_set_scale(img, scale);
+    }
+
+    lv_obj_center(img);
+}
+
 #if CONFIG_USE_WECHAT_MESSAGE_STYLE
 void LcdDisplay::SetupUI() {
+#if CONFIG_BOARD_TYPE_BREAD_COMPACT_WIFI_LCD
+    SetupEyesOnlyUI();
+    return;
+#endif
     DisplayLockGuard lock(this);
 
     auto lvgl_theme = static_cast<LvglTheme*>(current_theme_);
@@ -500,6 +549,10 @@ void LcdDisplay::SetupUI() {
 #define  MAX_MESSAGES 20
 #endif
 void LcdDisplay::SetChatMessage(const char* role, const char* content) {
+#if CONFIG_BOARD_TYPE_BREAD_COMPACT_WIFI_LCD
+    // Bread-compact-wifi-lcd shows only static eyes image.
+    return;
+#endif
     DisplayLockGuard lock(this);
     if (content_ == nullptr) {
         return;
@@ -688,6 +741,10 @@ void LcdDisplay::SetChatMessage(const char* role, const char* content) {
 }
 
 void LcdDisplay::SetPreviewImage(std::unique_ptr<LvglImage> image) {
+#if CONFIG_BOARD_TYPE_BREAD_COMPACT_WIFI_LCD
+    // Bread-compact-wifi-lcd shows only static eyes image.
+    return;
+#endif
     DisplayLockGuard lock(this);
     if (content_ == nullptr) {
         return;
@@ -772,6 +829,10 @@ void LcdDisplay::SetPreviewImage(std::unique_ptr<LvglImage> image) {
 }
 #else
 void LcdDisplay::SetupUI() {
+#if CONFIG_BOARD_TYPE_BREAD_COMPACT_WIFI_LCD
+    SetupEyesOnlyUI();
+    return;
+#endif
     DisplayLockGuard lock(this);
     LvglTheme* lvgl_theme = static_cast<LvglTheme*>(current_theme_);
     auto text_font = lvgl_theme->text_font()->font();
@@ -926,6 +987,10 @@ void LcdDisplay::SetupUI() {
 }
 
 void LcdDisplay::SetPreviewImage(std::unique_ptr<LvglImage> image) {
+#if CONFIG_BOARD_TYPE_BREAD_COMPACT_WIFI_LCD
+    // Bread-compact-wifi-lcd shows only static eyes image.
+    return;
+#endif
     DisplayLockGuard lock(this);
     if (preview_image_ == nullptr) {
         ESP_LOGE(TAG, "Preview image is not initialized");
@@ -962,6 +1027,10 @@ void LcdDisplay::SetPreviewImage(std::unique_ptr<LvglImage> image) {
 }
 
 void LcdDisplay::SetChatMessage(const char* role, const char* content) {
+#if CONFIG_BOARD_TYPE_BREAD_COMPACT_WIFI_LCD
+    // Bread-compact-wifi-lcd shows only static eyes image.
+    return;
+#endif
     DisplayLockGuard lock(this);
     if (chat_message_label_ == nullptr) {
         return;
@@ -971,6 +1040,10 @@ void LcdDisplay::SetChatMessage(const char* role, const char* content) {
 #endif
 
 void LcdDisplay::SetEmotion(const char* emotion) {
+#if CONFIG_BOARD_TYPE_BREAD_COMPACT_WIFI_LCD
+    // Bread-compact-wifi-lcd shows only static eyes image.
+    return;
+#endif
     // Stop any running GIF animation
     if (gif_controller_) {
         DisplayLockGuard lock(this);
@@ -1040,6 +1113,10 @@ void LcdDisplay::SetEmotion(const char* emotion) {
 }
 
 void LcdDisplay::SetTheme(Theme* theme) {
+#if CONFIG_BOARD_TYPE_BREAD_COMPACT_WIFI_LCD
+    // Bread-compact-wifi-lcd shows only static eyes image.
+    return;
+#endif
     DisplayLockGuard lock(this);
     
     auto lvgl_theme = static_cast<LvglTheme*>(theme);
@@ -1182,6 +1259,10 @@ void LcdDisplay::SetTheme(Theme* theme) {
 }
 
 void LcdDisplay::SetHideSubtitle(bool hide) {
+#if CONFIG_BOARD_TYPE_BREAD_COMPACT_WIFI_LCD
+    // Bread-compact-wifi-lcd shows only static eyes image.
+    return;
+#endif
     DisplayLockGuard lock(this);
     hide_subtitle_ = hide;
     
