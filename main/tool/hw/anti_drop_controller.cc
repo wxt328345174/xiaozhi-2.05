@@ -53,24 +53,18 @@ void AntiDropController::MonitorTask() {
         // 读取传感器状态
         uint8_t status = ir_sensors_->ReadAllSensors();
         
-        // 检查前向传感器 (bit0=FR, bit1=FM, bit2=FL)
-        bool front_edge = false;
-        if (!(status & (1 << IrSensorManager::IR_FRONT_RIGHT)) ||
-            !(status & (1 << IrSensorManager::IR_FRONT_MIDDLE)) ||
-            !(status & (1 << IrSensorManager::IR_FRONT_LEFT))) {
-            front_edge = true;
-        }
+        // 【测试模式】仅检查中间传感器
+        // 前向中间传感器 (bit1=FM)
+        bool front_edge = !(status & (1 << IrSensorManager::IR_FRONT_MIDDLE));
         
-        // 检查边缘传感器 (bit3=EL, bit4=EM, bit5=ER)
-        bool edge_edge = false;
-        if (!(status & (1 << IrSensorManager::IR_EDGE_LEFT)) ||
-            !(status & (1 << IrSensorManager::IR_EDGE_MIDDLE)) ||
-            !(status & (1 << IrSensorManager::IR_EDGE_RIGHT))) {
-            edge_edge = true;
-        }
+        // 边缘中间传感器 (bit4=EM)
+        bool edge_edge = !(status & (1 << IrSensorManager::IR_EDGE_MIDDLE));
         
-        // 执行避让动作（前向优先）
-        if (front_edge && !avoiding_drop_) {
+        // 执行避让动作
+        if (front_edge && edge_edge && !avoiding_drop_) {
+            // 同时悬空，不动作
+            ESP_LOGW(TAG, "BOTH EDGES detected! Holding position...");
+        } else if (front_edge && !avoiding_drop_) {
             ESP_LOGW(TAG, "FRONT EDGE detected! Moving backward...");
             ExecuteAvoidAction(-1);  // 后退
         } else if (edge_edge && !avoiding_drop_) {
