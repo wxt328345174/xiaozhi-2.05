@@ -53,23 +53,21 @@ void AntiDropController::MonitorTask() {
         // 读取传感器状态
         uint8_t status = ir_sensors_->ReadAllSensors();
         
-        // 【测试模式】仅检查中间传感器
-        // 前向中间传感器 (bit1=FM)
-        bool front_edge = !(status & (1 << IrSensorManager::IR_FRONT_MIDDLE));
+        // 【单传感器测试模式】仅使用边缘中间传感器 (EM, GPIO17)
+        // ITR8307: 1=地面, 0=悬空
+        bool is_ground = (status & (1 << IrSensorManager::IR_EDGE_MIDDLE));
         
-        // 边缘中间传感器 (bit4=EM)
-        bool edge_edge = !(status & (1 << IrSensorManager::IR_EDGE_MIDDLE));
-        
-        // 执行避让动作
-        if (front_edge && edge_edge && !avoiding_drop_) {
-            // 同时悬空，不动作
-            ESP_LOGW(TAG, "BOTH EDGES detected! Holding position...");
-        } else if (front_edge && !avoiding_drop_) {
-            ESP_LOGW(TAG, "FRONT EDGE detected! Moving backward...");
-            ExecuteAvoidAction(-1);  // 后退
-        } else if (edge_edge && !avoiding_drop_) {
-            ESP_LOGW(TAG, "EDGE detected! Moving forward...");
-            ExecuteAvoidAction(1);   // 前进
+        if (!avoiding_drop_) {
+            if (is_ground) {
+                // 检测到地面 -> 后退
+                // 注意：这会导致在平地上持续触发后退动作
+                ESP_LOGI(TAG, "Ground detected (EM)! Moving backward...");
+                ExecuteAvoidAction(-1); 
+            } else {
+                // 未检测到地面 (悬空) -> 前进
+                ESP_LOGW(TAG, "Edge detected (EM)! Moving forward...");
+                ExecuteAvoidAction(1);
+            }
         }
         
         vTaskDelay(pdMS_TO_TICKS(check_interval_ms_));
